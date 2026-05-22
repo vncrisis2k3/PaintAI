@@ -2,20 +2,25 @@
   "version": 2,
   "buildCommand": "pip install -r requirements.txt",
   "env": {
-    "GEMINI_API_KEY": "@GEMINI_API_KEY"
+    "GEMINI_API_KEY": "@gemini_api_key"
   },
   "functions": {
     "api/index.py": {
-      "runtime": "python3.11"
+      "runtime": "python3.11",
+      "maxDuration": 30
     }
   },
   "routes": [
     {
-      "src": "/api/(.*)",
+      "src": "/api/.*",
       "dest": "/api/index.py"
     },
     {
-      "src": "/(.*)",
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*\\..*)",
       "dest": "/static/$1"
     },
     {
