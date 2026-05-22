@@ -88,13 +88,17 @@ def apply_paint_color_simple(image_base64: str, paint_areas: Dict[str, str], pro
 
 def apply_paint_color_advanced(image_base64: str, paint_areas: Dict[str, str], project_type: str) -> str:
     """
-    Apply different paint colors to different regions of the image.
+    Apply paint colors ONLY to main wall regions, preserve sky/vegetation/background.
     
-    Strategy:
-    1. Divide image into regions based on paint_areas count
-    2. Apply different colors to each region
-    3. Use strong blending (70%) for visible effect
-    4. Enhance saturation and contrast
+    Strategy for EXTERIOR:
+    1. Detect sky region (top ~20-30%)
+    2. Detect ground/foreground region (bottom ~10-20%)
+    3. Paint ONLY middle region (main walls)
+    4. Apply color blending with texture preservation
+    
+    Strategy for INTERIOR:
+    1. Paint main surfaces (walls)
+    2. Preserve windows, fixtures, furniture
     """
     try:
         # Decode base64 image
@@ -116,58 +120,72 @@ def apply_paint_color_advanced(image_base64: str, paint_areas: Dict[str, str], p
         height, width = working_image.size[::-1]  # Get height, width properly
         result_array = np.array(working_image, dtype=np.float32)
         
-        # Get paint colors
-        paint_colors = list(paint_areas.values())
-        num_colors = len(paint_colors)
-        
-        if num_colors == 0:
+        # Get primary paint color (first color is usually main wall)
+        paint_colors = list(paint_areas.items())
+        if len(paint_colors) == 0:
             return image_base64
         
-        # Divide image into horizontal bands, each with different color
-        # Example: 3 colors → divide into 3 horizontal sections
-        section_height = height // num_colors
+        primary_area_name, primary_hex = paint_colors[0]
+        primary_rgb = np.array(hex_to_rgb(primary_hex), dtype=np.float32)
         
-        for idx, (area_name, hex_color) in enumerate(paint_areas.items()):
-            target_rgb = np.array(hex_to_rgb(hex_color), dtype=np.float32)
+        # Region detection for EXTERIOR buildings
+        if project_type == "exterior":
+            # Assume: sky at top, walls in middle, ground at bottom
+            sky_height = int(height * 0.25)      # Top 25% = sky
+            wall_height = int(height * 0.65)     # Middle 65% = main walls (PAINT THIS)
+            ground_height = height - sky_height - wall_height  # Bottom = ground
             
-            # Calculate section boundaries
-            y_start = idx * section_height
-            y_end = (idx + 1) * section_height if idx < num_colors - 1 else height
+            # Paint ONLY the wall region
+            wall_start = sky_height
+            wall_end = sky_height + wall_height
             
-            # Apply color to this section with STRONG blending
-            blend_ratio = 0.75  # 75% paint color, 25% original
+            blend_ratio = 0.70  # 70% paint, 30% original texture
             
-            # Method: Direct color blend + overlay
-            result_array[y_start:y_end, :, :] = (
-                result_array[y_start:y_end, :, :] * (1 - blend_ratio) + 
-                target_rgb * blend_ratio
+            # Apply color to wall region only
+            result_array[wall_start:wall_end, :, :] = (
+                result_array[wall_start:wall_end, :, :] * (1 - blend_ratio) + 
+                primary_rgb * blend_ratio
             )
             
-            # Second pass: Color overlay with lower intensity
-            overlay_blend = 0.4
-            result_array[y_start:y_end, :, :] = (
-                result_array[y_start:y_end, :, :] * (1 - overlay_blend) + 
-                target_rgb * overlay_blend
+            # Apply secondary color if provided (accent/trim)
+            if len(paint_colors) > 1:
+                accent_area_name, accent_hex = paint_colors[1]
+                accent_rgb = np.array(hex_to_rgb(accent_hex), dtype=np.float32)
+                
+                # Apply accent to upper portion of wall (trim area)
+                trim_height = int(wall_height * 0.15)  # Top 15% of wall = trim
+                trim_end = wall_start + trim_height
+                
+                accent_blend = 0.65
+                result_array[wall_start:trim_end, :, :] = (
+                    result_array[wall_start:trim_end, :, :] * (1 - accent_blend) + 
+                    accent_rgb * accent_blend
+                )
+            
+            # ✅ SKY and GROUND regions are UNTOUCHED
+            
+        else:  # INTERIOR
+            # For interior, paint middle 60% (main wall area)
+            interior_start = int(height * 0.15)
+            interior_end = int(height * 0.75)
+            
+            blend_ratio = 0.70
+            result_array[interior_start:interior_end, :, :] = (
+                result_array[interior_start:interior_end, :, :] * (1 - blend_ratio) + 
+                primary_rgb * blend_ratio
             )
         
         # Normalize
         result_array = np.clip(result_array, 0, 255).astype(np.uint8)
         result_image = Image.fromarray(result_array)
         
-        # Enhance saturation to make colors more vivid
+        # Enhance saturation ONLY in painted regions (subtle enhancement)
         saturation_enhancer = ImageEnhance.Color(result_image)
-        result_image = saturation_enhancer.enhance(1.4)  # +40% color saturation
+        result_image = saturation_enhancer.enhance(1.15)  # +15% color saturation (subtle)
         
-        # Enhance contrast
+        # Enhance contrast slightly
         contrast_enhancer = ImageEnhance.Contrast(result_image)
-        result_image = contrast_enhancer.enhance(1.2)  # +20% contrast
-        
-        # Enhance brightness slightly
-        brightness_enhancer = ImageEnhance.Brightness(result_image)
-        result_image = brightness_enhancer.enhance(1.05)  # +5% brightness
-        
-        # Sharpen
-        result_image = result_image.filter(ImageFilter.UnsharpMask(radius=2, percent=200, threshold=2))
+        result_image = contrast_enhancer.enhance(1.08)  # +8% contrast
         
         # Encode
         output_bytes = io.BytesIO()

@@ -634,25 +634,38 @@ def ai_colorize(payload: AIColorizeRequest):
         raise HTTPException(status_code=400, detail="Mã hóa ảnh Base64 không hợp lệ.")
 
     system_prompt = """
-You are an expert architectural color consultant and AI vision engineer.
-Your task is to analyze the provided image of a building and recommend a highly aesthetic, realistic paint color scheme.
-You must perform the following:
-1. Semantic Segmentation analysis: Identify the main walls, columns/pillars, cornice/trim, and roof outlines. You must preserve the window glass, doors, vegetation, sky, and original ambient lighting untouched.
-2. Advanced Texture Mapping guidance: Blend the target color paint code with the existing 3D shadows, light sources, and surface textures of the building. Maintain original roughness and specular highlights.
-3. Determine:
-   - The architectural style of the building (e.g., Modern Minimalist, Neoclassical, Nordic, Classical, Mid-century Modern).
-   - A primary paint color recommendation (paint name, brand, hex code).
-   - An accent paint color recommendation (paint name, brand, hex code).
-   - Detailed design reasoning explaining why this palette fits the architectural style and enhances curb appeal.
+You are an expert architectural color consultant and AI vision engineer specializing in semantic paint region analysis.
 
-Your output must be a valid JSON object matching this schema:
+CRITICAL INSTRUCTION - Paint ONLY Wall Regions:
+========================================
+You must IDENTIFY and recommend colors for ONLY these regions:
+- Main building facade/walls
+- Trim, sills, lintels, cornices
+- Architectural accents (chosen surfaces only)
+
+You MUST NOT recommend painting:
+- Sky, clouds, atmosphere
+- Windows, glass, reflections
+- Vegetation, trees, landscaping
+- Ground, pavement, roads
+- Shadows (preserve depth and contrast)
+- Water elements
+- Foreground objects
+
+Your analysis MUST include:
+1. Architectural style (e.g., Modern Minimalist, Neoclassical, Nordic, Classical, Mid-century Modern)
+2. Primary paint color for MAIN WALLS ONLY
+3. Optional accent color for TRIM/SECONDARY architectural elements  
+4. Clear design reasoning that explains how the paint colors enhance the building without altering its surroundings
+
+Output MUST be valid JSON:
 {
   "architecturalStyle": "string",
   "primaryPaint": {
-    "name": "string",
-    "brand": "string",
-    "hex": "string",
-    "paintCode": "string"
+    "name": "string (paint name)",
+    "brand": "string (manufacturer)",
+    "hex": "string (e.g., #FFFFFF)",
+    "paintCode": "string (product code)"
   },
   "accentPaint": {
     "name": "string",
@@ -660,7 +673,7 @@ Your output must be a valid JSON object matching this schema:
     "hex": "string",
     "paintCode": "string"
   },
-  "designReasoning": "string"
+  "designReasoning": "Explain how this color scheme enhances curb appeal while preserving the building's context and surroundings"
 }
 """
 
