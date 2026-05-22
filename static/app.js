@@ -2051,7 +2051,8 @@ function openAPIKeyModal() {
         input.value = savedKey;
     }
     
-    modal.style.display = "flex";
+    // Add show class to make modal visible
+    modal.classList.add("show");
     input?.focus();
 }
 
@@ -2061,7 +2062,8 @@ function openAPIKeyModal() {
 function closeAPIKeyModal() {
     const modal = document.getElementById("apiKeyModal");
     if (modal) {
-        modal.style.display = "none";
+        // Remove show class to hide modal
+        modal.classList.remove("show");
     }
     clearAPIKeyStatus();
 }
