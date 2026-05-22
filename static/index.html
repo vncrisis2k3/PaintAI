@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PaintAI - Hệ Thống Phối Màu Kiến Trúc Thông Minh</title>
+    <!-- Google Fonts: Inter & Manrope from PaintAI project -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800;900&display=swap" rel="stylesheet">
+    <!-- FontAwesome for dashboard icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    
+    <!-- Babel CDN (React is imported dynamically via ESM in ai-editor.js) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS CDN (v3.4.5) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            corePlugins: {
+                preflight: false
+            },
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+                        headline: ["Manrope", "sans-serif"],
+                    },
+                    colors: {
+                        primary: '#4352a5',
+                        'primary-container': '#5c6bc0',
+                        'on-primary': '#ffffff',
+                        surface: '#f7f9fc',
+                        'surface-container': '#eceef1',
+                        'surface-container-low': '#f2f4f7',
+                        'surface-container-high': '#e6e8eb',
+                        'on-surface': '#191c1e',
+                        'on-surface-variant': '#454651',
+                        'outline-variant': '#c6c5d3',
+                        'secondary-container': '#abb7ff',
+                        'on-secondary-container': '#394687',
+                        tertiary: '#7b5000',
+                        'tertiary-fixed': '#ffddb4',
+                        'on-tertiary-fixed-variant': '#633f00',
+                        error: '#ba1a1a',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        
+        <!-- LEFT SIDEBAR: PAINTAI LIGHT THEME -->
+        <aside class="sidebar-left" id="sidebar-left">
+            <!-- Brand Logo -->
+            <div class="brand-logo-container">
+                <h1 class="logo-title">PaintAI</h1>
+                <p class="logo-sub">Professional Suite</p>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <button id="tab-ai" class="sidebar-nav-btn" data-tab="ai">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Phối màu AI</span>
+                    <span class="badge-new">Hot</span>
+                </button>
+                <button id="tab-templates" class="sidebar-nav-btn active" data-tab="templates">
+                    <i class="fa-solid fa-house-chimney"></i>
+                    <span>Thư viện mẫu</span>
+                </button>
+                <button id="tab-visualizer" class="sidebar-nav-btn" data-tab="visualizer">
+                    <i class="fa-solid fa-cube"></i>
+                    <span>Phối màu 3D</span>
+                </button>
+                <button id="tab-saved" class="sidebar-nav-btn" data-tab="saved">
+                    <i class="fa-solid fa-folder-heart"></i>
+                    <span>Thiết kế của tôi</span>
+                </button>
+            </nav>
+            
+            <!-- Bottom actions matching PaintAI Sidebar.tsx -->
+            <div class="sidebar-footer">
+                <div class="sidebar-bottom-links">
+                    <button class="sidebar-bottom-btn">
+                        <i class="fa-solid fa-circle-question"></i>
+                        <span>Support</span>
+                    </button>
+                </div>
+                <p class="version">Version 2.4.0</p>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-content">
+            
+            <!-- STICKY TOP HEADER - PaintAI Header.tsx style -->
+            <header class="main-header">
+                <div class="header-title-area">
+                    <h2 id="header-main-title">Thư viện mẫu công trình</h2>
+                    <p id="header-sub-title">Xem trước ý tưởng phối màu cho không gian của bạn</p>
+                </div>
+                
+                <div class="header-actions">
+                    <!-- Nav links (hidden on small screens) -->
+                    <div class="header-nav-links">
+                        <a href="#" class="header-nav-link" onclick="document.getElementById('tab-ai').click(); return false;">Dashboard</a>
+                        <a href="#" class="header-nav-link" onclick="document.getElementById('tab-templates').click(); return false;">Projects</a>
+                    </div>
+                    
+                    <div class="header-right-controls">
+                        <button class="header-start-btn" onclick="document.getElementById('tab-ai').click()">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span>Start Painting</span>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- TAB CONTENT: PHỐI MÀU AI - FULL EDITOR -->
+            <div id="tab-content-ai" class="tab-content-wrapper">
+                <div class="ai-color-editor-container">
+                    <!-- Left Panel: Configuration -->
+                    <div class="ai-left-panel">
+                        <div class="ai-config-card">
+                            <div id="ai-step-1" class="ai-step-container">
+                                <div class="ai-step-header">
+                                    <h3>Tải lên ảnh công trình của bạn</h3>
+                                    <p>Sử dụng ảnh rõ nét, độ phân giải cao để có kết quả tốt nhất</p>
+                                </div>
+                                <div class="upload-area" onclick="document.getElementById('ai-file-input').click()">
+                                    <div class="upload-icon-large">📤</div>
+                                    <h4>Nhấn để tải lên <span style="font-weight: 400; font-size: 11px;">hoặc kéo và thả</span></h4>
+                                    <p>PNG, JPG, hoặc WEBP (tối đa 10MB)</p>
+                                </div>
+                                <input type="file" id="ai-file-input" accept="image/*" style="display: none;">
+                                <div class="upload-tip-box">
+                                    <div class="tip-header">
+                                        <i class="fa-solid fa-lightbulb"></i>
+                                        <span>Mẹo để có kết quả tốt nhất:</span>
+                                    </div>
+                                    <ul>
+                                        <li>Sử dụng ảnh rõ nét, độ phân giải cao.</li>
+                                        <li>Đảm bảo không gian có ánh sáng tốt và đều.</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div id="ai-step-2" class="ai-step-container" style="display: none;">
+                                <div class="ai-step-header">
+                                    <h3>Đây là công trình nội thất hay ngoại thất?</h3>
+                                    <p>Chọn đúng loại sẽ giúp AI xác định các chi tiết kiến trúc chính xác hơn.</p>
+                                </div>
+                                <div class="type-selection-grid">
+                                    <button class="type-button" onclick="aiSetType('interior')">
+                                        <div class="type-icon-wrapper">🏠</div>
+                                        <h4>Nội thất</h4>
+                                        <p>Phòng khách, phòng ngủ, bếp...</p>
+                                    </button>
+                                    <button class="type-button" onclick="aiSetType('exterior')">
+                                        <div class="type-icon-wrapper">🏡</div>
+                                        <h4>Ngoại thất</h4>
+                                        <p>Mặt tiền, sân vườn, hàng rào...</p>
+                                    </button>
+                                </div>
+                                <button class="btn-back" onclick="aiGoToStep(1)">← Quay lại</button>
+                            </div>
+
+                            <div id="ai-step-3" class="ai-step-container" style="display: none;">
+                                <div class="ai-step-header">
+                                    <h3>Gán màu cho chi tiết</h3>
+                                    <p>Chọn phân vùng cần sơn từ danh sách bên dưới</p>
+                                </div>
+
+                                <div class="color-assignment-section">
+                                    <div class="color-assignment-title">Phân vùng cần sơn</div>
+                                    <div class="color-parts-list" id="ai-paint-areas">
+                                        <!-- Rendered dynamically by aiRenderPaintAreas(type) -->
+                                    </div>
+                                </div>
+
+                                <div class="color-search-section">
+                                    <div class="color-search-title">Chọn màu cho <span style="font-style: italic; color: var(--color-primary);" id="ai-selected-part-name">Tường chính</span></div>
+                                    <div class="color-search-box">
+                                        <i class="fa-solid fa-magnifying-glass color-search-icon"></i>
+                                        <input type="text" placeholder="Tìm màu..." id="ai-color-search">
+                                    </div>
+
+                                    <div class="color-palette-grid" id="ai-color-palette">
+                                        <!-- Rendered dynamically from mauson.txt -->
+                                    </div>
+                                </div>
+
+                                <div class="ai-action-buttons">
+                                    <button class="btn-generate" onclick="aiGenerateColors()">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                        Tạo ảnh phối màu
+                                    </button>
+                                    <button class="btn-refresh" onclick="aiGoToStep(2)">
+                                        <i class="fa-solid fa-arrow-rotate-right"></i>
+                                        Làm mới
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Preview -->
+                    <div class="ai-right-panel">
+                        <div class="ai-preview-viewport">
+                            <div class="ai-preview-placeholder" id="ai-preview-placeholder">
+                                <div class="preview-placeholder-icon">🏗️</div>
+                                <h3 class="preview-placeholder-title">Dự Án Của Bạn Sẽ Hiện Ở Đây</h3>
+                                <p class="preview-placeholder-desc">Tải lên ảnh công trình của bạn để bắt đầu hành trình sáng tạo màu sắc với công nghệ AI tiên tiến của PaintAI.</p>
+                            </div>
+                            
+                            <!-- Comparison Slider -->
+                            <div class="ai-comparison-container" id="ai-comparison-container" style="display: none;">
+                                <!-- Original Image -->
+                                <img id="ai-original-image" class="ai-comparison-image ai-original" alt="Ảnh gốc">
+                                
+                                <!-- Comparison Wrapper -->
+                                <div class="ai-comparison-wrapper">
+                                    <!-- Generated Image -->
+                                    <img id="ai-generated-image" class="ai-comparison-image ai-generated" alt="Ảnh phối màu">
+                                    
+                                    <!-- Slider Handle -->
+                                    <div class="ai-comparison-slider" id="ai-comparison-slider">
+                                        <div class="ai-slider-handle">
+                                            <span class="ai-slider-label-left">Gốc</span>
+                                            <svg class="ai-slider-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="15 18 9 12 15 6"></polyline>
+                                                <polyline points="9 18 3 12 9 6"></polyline>
+                                            </svg>
+                                            <svg class="ai-slider-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="9 18 15 12 9 6"></polyline>
+                                                <polyline points="15 18 21 12 15 6"></polyline>
+                                            </svg>
+                                            <span class="ai-slider-label-right">Phối màu</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Static generated image (fallback) -->
+                            <img id="ai-preview-image" style="display: none;" class="ai-preview-image">
+                            
+                            <div class="ai-preview-controls" id="ai-preview-controls" style="display: none;">
+                                <button class="control-icon-btn" title="Phóng to">🔍+</button>
+                                <button class="control-icon-btn" title="Thu nhỏ">🔍-</button>
+                            </div>
+                        </div>
+                        <div class="ai-preview-footer">
+                            <span id="ai-preview-status">Chưa có dự án nào được chọn</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- /tab-content-ai -->
+
+            <!-- TAB CONTENT: THƯ VIỆN MẪU (CATALOG PAGE) -->
+
+            <div id="tab-content-templates" class="tab-content-wrapper active">
+                
+                <!-- PROMOTIONAL AI BANNER -->
+                <div class="ai-promo-banner">
+                    <div class="promo-text">
+                        <h3>Bạn muốn tự phối màu bằng AI?</h3>
+                        <p>Nhận thiết kế đẹp trong 30 giây từ bản vẽ thô hoặc ảnh chụp công trình của bạn.</p>
+                    </div>
+                    <div class="promo-actions">
+                        <button class="btn-promo-ai" onclick="document.getElementById('tab-ai').click()">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Thử AI ngay
+                        </button>
+                        <button class="btn-promo-req">Gửi yêu cầu phối màu</button>
+                    </div>
+                </div>
+
+                <!-- SEARCH & FILTER BAR -->
+                <div class="filters-search-container">
+                    <div class="search-box-wrapper">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="search-templates" placeholder="Tìm kiếm công trình mẫu..." class="search-input">
+                    </div>
+                    
+                    <div class="filters-row">
+                        <div class="filter-group">
+                            <select id="filter-project-type" class="custom-select">
+                                <option value="">Tất cả loại nhà</option>
+                                <!-- Dynamically loaded -->
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <select id="filter-floors" class="custom-select">
+                                <option value="">Tất cả số tầng</option>
+                                <option value="1">1 tầng</option>
+                                <option value="2">2 tầng</option>
+                                <option value="3">3 tầng</option>
+                                <option value="4">4 tầng+</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <select id="filter-facades" class="custom-select">
+                                <option value="">Tất cả số mặt tiền</option>
+                                <option value="1">1 mặt tiền</option>
+                                <option value="2">2 mặt tiền</option>
+                                <option value="3">3 mặt tiền+</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="library-header-bar">
+                    <h3 class="section-title"><i class="fa-solid fa-table-cells"></i> Danh sách mô hình</h3>
+                    <span id="templates-count" class="count-badge">0 mẫu</span>
+                </div>
+
+                <!-- TEMPLATES GRID -->
+                <div id="templates-grid" class="templates-grid">
+                    <!-- Loaded dynamically -->
+                    <div class="loading-spinner">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                        <p>Đang tải thư viện mẫu nhà...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB CONTENT: PHỐI MÀU 3D (ACTIVE EDITOR WORKSPACE) -->
+            <div id="tab-content-visualizer" class="tab-content-wrapper">
+                
+                <!-- PLACEHOLDER IF NO ACTIVE PROJECT SELECTED -->
+                <div class="no-active-project-placeholder" id="no-project-placeholder">
+                    <div class="placeholder-icon"><i class="fa-solid fa-cube"></i></div>
+                    <h3>Chưa chọn mẫu công trình</h3>
+                    <p>Vui lòng truy cập Thư viện mẫu, duyệt qua hàng trăm mẫu nhà 3D đẹp mắt và chọn một mẫu để bắt đầu phối màu thời gian thực.</p>
+                    <button class="btn-goto-library" onclick="document.getElementById('tab-templates').click()">
+                        <i class="fa-solid fa-house-chimney"></i> Khám phá Thư viện mẫu
+                    </button>
+                </div>
+
+                <!-- THE ACTUAL EDITOR WORKSPACE -->
+                <div class="workspace-editor-grid" id="workspace-editor-grid" style="display: none;">
+                    
+                    <!-- CENTER VISUALIZER VIEWPORT -->
+                    <section class="canvas-viewport">
+                        <div class="canvas-card">
+                            
+                            <!-- CANVAS HEADER WITH ACTIONS AND BLENDING -->
+                            <div class="canvas-header">
+                                <div class="active-house-info">
+                                    <h3 id="current-house-name">Đang tải công trình...</h3>
+                                    <p id="current-house-desc">Bấm chọn mẫu nhà ở cột bên trái để bắt đầu phối màu</p>
+                                </div>
+                                
+                                <div class="canvas-actions-bar">
+                                    <button id="btn-undo" class="control-btn" title="Hoàn tác (Undo)" disabled>
+                                        <i class="fa-solid fa-rotate-left"></i>
+                                        <span>Hoàn tác</span>
+                                    </button>
+                                    <button id="btn-redo" class="control-btn" title="Làm lại (Redo)" disabled>
+                                        <i class="fa-solid fa-rotate-right"></i>
+                                        <span>Làm lại</span>
+                                    </button>
+                                    <button id="btn-reset" class="control-btn" title="Đặt lại từ đầu">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                        <span>Đặt lại</span>
+                                    </button>
+                                    <button id="btn-compare" class="control-btn" title="So sánh Trước/Sau (Bật/Tắt)">
+                                        <i class="fa-solid fa-columns"></i>
+                                        <span>So sánh</span>
+                                    </button>
+                                    <button id="btn-save" class="control-btn" title="Lưu thiết kế hiện tại">
+                                        <i class="fa-solid fa-floppy-disk"></i>
+                                        <span>Lưu</span>
+                                    </button>
+                                    <button id="btn-export" class="control-btn primary-btn" title="Xuất ảnh phối màu">
+                                        <i class="fa-solid fa-file-arrow-down"></i>
+                                        <span>Xuất ảnh</span>
+                                    </button>
+                                </div>
+
+                                <div class="blend-mode-switch">
+                                    <label class="switch-label" for="blend-method-toggle">Chế độ:</label>
+                                    <div class="toggle-container">
+                                        <span class="toggle-mode" id="mode-canvas">Canvas</span>
+                                        <input type="checkbox" id="blend-method-toggle" class="toggle-checkbox" checked>
+                                        <label for="blend-method-toggle" class="toggle-switch"></label>
+                                        <span class="toggle-mode active" id="mode-css">Multiply</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Canvas Container for absolute Stacking -->
+                            <div class="canvas-container" id="visualizer-container">
+                                <!-- Stacking layers will go here -->
+                                <div class="canvas-loader" id="canvas-loader">
+                                    <div class="loader-dots">
+                                        <span></span><span></span><span></span>
+                                    </div>
+                                    <p>Đang tải mô hình 3D...</p>
+                                </div>
+                                
+                                <!-- Dynamic overlay for blended color fallback (CSS Blend Mode method) -->
+                                <div class="css-layers-wrapper" id="css-layers-wrapper" style="display: none;">
+                                    <!-- Dynamically generated image stack + blend divs -->
+                                </div>
+
+                                <!-- COMPARE MODE ORIGINAL LAYER OVERLAY (CSS) -->
+                                <div class="css-layers-wrapper compare-only" id="css-layers-original-wrapper" style="display: none;">
+                                    <!-- Dynamically generated uncolored image stack -->
+                                </div>
+
+                                <!-- Professional HTML5 Canvas visualizer container (Canvas Blending method) -->
+                                <div class="canvas-wrapper-real" id="canvas-wrapper-real">
+                                    <canvas id="main-drawing-canvas"></canvas>
+                                </div>
+
+                                <!-- COMPARE MODE ORIGINAL CANVAS OVERLAY (Canvas) -->
+                                <div class="canvas-wrapper-real compare-only" id="canvas-wrapper-original" style="display: none;">
+                                    <canvas id="original-drawing-canvas"></canvas>
+                                </div>
+                            </div>
+                            
+                            <div class="canvas-footer">
+                                <div class="tip-banner">
+                                    <i class="fa-solid fa-circle-info"></i>
+                                    <span>Chọn phân vùng ở cột bên phải hoặc click trực tiếp lên ảnh, sau đó bấm chọn một mã màu sơn để thay đổi màu sắc ngay lập tức!</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- RIGHT SIDEBAR: LAYER SELECTOR & INFINITE COLOR GRID -->
+                    <aside class="sidebar-right">
+                        <!-- TOP PANEL: ACTIVE HOUSE LAYERS -->
+                        <div class="panel-section layers-panel">
+                            <h2 class="panel-title"><i class="fa-solid fa-layer-group"></i> Phân vùng cần sơn</h2>
+                            <div id="layers-list" class="layers-list">
+                                <!-- Loaded dynamically -->
+                                <div class="no-layers-placeholder">
+                                    <i class="fa-solid fa-house-laptop"></i>
+                                    <p>Vui lòng mở một mẫu nhà để hiển thị các phân vùng</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- BOTTOM PANEL: INFINITE SCROLL COLOR PALETTE -->
+                        <div class="panel-section colors-panel">
+                            <div class="color-tabs-header">
+                                <button class="color-tab active" id="color-tab-main">
+                                    <i class="fa-solid fa-palette"></i> Danh mục
+                                </button>
+                                <button class="color-tab" id="color-tab-favorites">
+                                    <i class="fa-solid fa-heart"></i> Yêu thích
+                                </button>
+                            </div>
+                            
+                            <div class="color-tab-controls" id="color-tab-controls">
+                                <div class="colors-filters-block">
+                                    <div class="filter-group-colors">
+                                        <select id="filter-brand" class="custom-select brand-select">
+                                            <option value="">Tất cả danh mục</option>
+                                            <option value="JOTUN">JOTUN</option>
+                                            <option value="DULUX">DULUX</option>
+                                            <option value="NIPPON">NIPPON</option>
+                                            <option value="KOVA">KOVA</option>
+                                            <option value="TOA">TOA</option>
+                                            <option value="SPEC">SPEC</option>
+                                            <option value="EXPO">EXPO</option>
+                                            <option value="MAXILITE">MAXILITE</option>
+                                            <option value="MYKOLOR GRAND">MYKOLOR GRAND</option>
+                                            <option value="MYKOLOR TOUCH">MYKOLOR TOUCH</option>
+                                            <option value="APEX">APEX</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="search-box-wrapper search-colors-wrapper">
+                                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                                        <input type="text" id="search-colors" placeholder="Tìm mã hoặc tên màu..." class="search-input">
+                                    </div>
+                                </div>
+
+                                <!-- Colors Category Quick Filter -->
+                                <div class="color-categories-scroll">
+                                    <button class="cat-chip active" data-cat="">Tất cả</button>
+                                    <button class="cat-chip" data-cat="APEX">APEX Premium</button>
+                                    <button class="cat-chip" data-cat="Exterior">Ngoại Thất</button>
+                                    <button class="cat-chip" data-cat="Interior">Nội Thất</button>
+                                    <button class="cat-chip" data-cat="Accent">Màu Nhấn</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Real-time count indicator matching aicolor.vn -->
+                            <div class="colors-count-indicator" id="colors-count-indicator">
+                                Đang kết nối thư viện màu...
+                            </div>
+
+                            <div class="colors-grid-container" id="colors-grid-container">
+                                <div id="colors-grid" class="colors-grid">
+                                    <!-- Loaded dynamically -->
+                                </div>
+                                
+                                <!-- Infinite scroll loader -->
+                                <div id="colors-load-more" class="load-more-trigger">
+                                    <div class="spinner-small"></div>
+                                    <span>Đang tải thêm màu...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+
+            <!-- TAB CONTENT: THIẾT KẾ CỦA TÔI (SAVED PROJECTS PAGE) -->
+            <div id="tab-content-saved" class="tab-content-wrapper">
+                <div class="saved-designs-main-container">
+                    <div class="saved-header-row">
+                        <h3 class="section-title"><i class="fa-solid fa-folder-heart"></i> Danh sách phương án phối màu</h3>
+                        <span id="saved-designs-count" class="count-badge">0 thiết kế</span>
+                    </div>
+                    
+                    <div id="saved-designs-list" class="saved-designs-grid">
+                        <!-- Loaded dynamically -->
+                        <div class="no-designs-placeholder">
+                            <i class="fa-solid fa-folder-open"></i>
+                            <p>Chưa có thiết kế nào được lưu. Hãy bấm "Lưu" khi đang phối màu 3D để lưu phương án của bạn!</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast-notification" class="toast">
+        <i class="fa-solid fa-circle-check toast-icon"></i>
+        <span id="toast-message">Đã áp dụng màu sơn thành công!</span>
+    </div>
+
+    <!-- Beautiful Glassmorphic Save Design Modal -->
+    <div id="save-design-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-floppy-disk"></i> Lưu phương án phối màu</h3>
+                <button class="close-modal-btn" id="btn-close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="save-design-name">Tên phương án phối màu</label>
+                    <input type="text" id="save-design-name" placeholder="Ví dụ: Tông xám xanh hiện đại, Mái thái ngói đỏ..." class="form-input" autocomplete="off">
+                    <span class="form-help">Phương án phối màu sẽ được lưu lại trong danh sách thiết kế của bạn.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn secondary-btn" id="btn-cancel-save">Hủy bỏ</button>
+                <button class="modal-btn primary-btn-modal" id="btn-confirm-save">Lưu thiết kế</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        // Custom interactive header titles based on navigation clicks
+        document.querySelectorAll(".sidebar-nav-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const view = btn.dataset.tab;
+                const headerTitle = document.getElementById("header-main-title");
+                const headerSub = document.getElementById("header-sub-title");
+                
+                if (view === "ai") {
+                    headerTitle.textContent = "Trợ Lý Phối Màu AI";
+                    headerSub.textContent = "Tự động phân tách và phối màu trực quan bằng AI trong 30 giây";
+                } else if (view === "templates") {
+                    headerTitle.textContent = "Thư viện mẫu công trình";
+                    headerSub.textContent = "Xem trước ý tưởng phối màu cho không gian của bạn";
+                } else if (view === "visualizer") {
+                    headerTitle.textContent = "Hệ thống Phối màu 3D";
+                    headerSub.textContent = "Không gian chỉnh sửa và tô màu kiến trúc thời gian thực";
+                } else if (view === "saved") {
+                    headerTitle.textContent = "Thiết kế của tôi";
+                    headerSub.textContent = "Nơi lưu trữ các ý tưởng phối màu độc đáo của riêng bạn";
+                }
+            });
+        });
+    </script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
