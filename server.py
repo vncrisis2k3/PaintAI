@@ -606,7 +606,13 @@ class AIColorizeRequest(BaseModel):
 def ai_colorize(payload: AIColorizeRequest):
     """
     Call Google Gemini 2.5 Flash API to analyze building structure and recommend paint colors.
-    Uses standard library urllib to remain zero-dependency.
+    Implements proper error handling for rate limits and quota exceeded.
+    
+    Flow:
+    1. Check Gemini API quota status
+    2. If limit reached → return error immediately (NO image processing)
+    3. If OK → call Gemini for analysis
+    4. Return results (PIL/OpenCV processing happens in separate endpoint)
     """
     api_key = payload.api_key or os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -616,6 +622,7 @@ def ai_colorize(payload: AIColorizeRequest):
             "message": "Không tìm thấy API Key Gemini. Vui lòng cấu hình biến môi trường GEMINI_API_KEY hoặc nhập khóa trong phần cài đặt."
         }
 
+    # Validate image format
     try:
         if "," in payload.image:
             header, base64_data = payload.image.split(",", 1)
@@ -707,10 +714,64 @@ Your output must be a valid JSON object matching this schema:
                 "success": True,
                 "data": ai_data
             }
+    
+    except urllib.error.HTTPError as e:
+        """Handle specific HTTP errors from Gemini API"""
+        error_body = e.read().decode("utf-8") if e.fp else ""
+        error_status = e.code
+        
+        try:
+            error_json = json.loads(error_body) if error_body else {}
+            error_msg = error_json.get("error", {}).get("message", "Unknown error")
+        except:
+            error_msg = error_body
+        
+        # Handle Rate Limit (429)
+        if error_status == 429:
+            return {
+                "success": False,
+                "error_type": "rate_limit",
+                "status_code": 429,
+                "message": f"❌ Gemini API đã đạt giới hạn yêu cầu. Vui lòng chờ một vài phút rồi thử lại.",
+                "detail": error_msg
+            }
+        
+        # Handle Quota Exceeded (400 - sometimes returned as quota error)
+        elif error_status == 400 and ("quota" in error_msg.lower() or "exceeded" in error_msg.lower()):
+            return {
+                "success": False,
+                "error_type": "quota_exceeded",
+                "status_code": 400,
+                "message": f"❌ Hạn mức sử dụng Gemini API hôm nay đã được vượt quá. Vui lòng thử lại vào ngày mai hoặc nâng cấp gói API.",
+                "detail": error_msg
+            }
+        
+        # Handle Invalid API Key
+        elif error_status == 401 or error_status == 403:
+            return {
+                "success": False,
+                "error_type": "invalid_api_key",
+                "status_code": error_status,
+                "message": f"❌ API Key Gemini không hợp lệ hoặc đã hết hạn.",
+                "detail": error_msg
+            }
+        
+        # Generic HTTP error
+        else:
+            return {
+                "success": False,
+                "error_type": "gemini_api_error",
+                "status_code": error_status,
+                "message": f"❌ Lỗi từ Gemini API (HTTP {error_status})",
+                "detail": error_msg
+            }
+    
     except Exception as e:
+        """Handle other exceptions"""
         return {
             "success": False,
-            "message": f"Lỗi khi gọi Gemini API: {str(e)}"
+            "error_type": "unknown_error",
+            "message": f"❌ Lỗi khi gọi Gemini API: {str(e)}"
         }
 
 # ==========================================================================
@@ -810,14 +871,24 @@ def ai_generate_colors(payload: AIGenerateColorsRequest):
     """
     Apply paint colors to image using local image processing (PIL).
     
-    NOTE: This is a quick implementation using PIL color overlay.
-    For production use, consider:
-    - Stable Diffusion for photorealistic results
+    ⚠️ IMPORTANT FLOW:
+    This endpoint should ONLY be called AFTER successful Gemini analysis.
+    Call sequence:
+    1. Call POST /api/ai-colorize with image → get Gemini analysis
+    2. If error_type in response → STOP (rate limit, quota exceeded, etc.)
+    3. If success=true → create paintAreas dict from Gemini response
+    4. Call POST /api/ai/generate-colors with paintAreas → get styled image
+    
+    This ensures:
+    - No API processing waste when Gemini is limited
+    - Clean error reporting when limits are reached
+    - Proper separation: AI analysis → Image processing
+    
+    NOTE: This uses PIL color overlay for quick implementation.
+    For production photorealistic results, use:
+    - Stable Diffusion for image inpainting
     - DALL-E 3 for professional quality
     - Custom ControlNet for precise area targeting
-    
-    Gemini 2.5 Flash cannot create or edit images (it's a LLM with vision capabilities only),
-    so this endpoint uses image processing instead.
     """
     
     try:
