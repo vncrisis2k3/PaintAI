@@ -464,7 +464,7 @@ async function aiGenerateColors() {
             image: image,
             projectType: type,
             paintAreas: colors,
-            api_key: null
+            api_key: localStorage.getItem("gemini_api_key") || null
         };
         
         console.log('📤 Request Payload Debug:', {
@@ -566,7 +566,16 @@ function showToast(message, type = "success") {
 // ==========================================================================
 async function testAIKey() {
     try {
-        const response = await fetch(`${API_BASE}/api/ai/test-key`);
+        const apiKey = localStorage.getItem("gemini_api_key");
+        const response = await fetch(`${API_BASE}/api/ai/test-key`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                api_key: apiKey || null
+            })
+        });
         const result = await response.json();
         
         if (result.success) {
@@ -2020,6 +2029,185 @@ function setupEventHandlers() {
     
     // 7. DIRECT CANVAS CLICK SELECTION
     DOM.visualizerContainer.addEventListener("click", handleVisualizerClick);
+    
+    // 8. LOAD API KEY FROM STORAGE
+    loadAPIKey();
+}
+
+// ==================== API KEY MODAL FUNCTIONS ====================
+
+/**
+ * Open the API Key modal dialog
+ */
+function openAPIKeyModal() {
+    const modal = document.getElementById("apiKeyModal");
+    if (!modal) return;
+    
+    // Load existing key from storage
+    const savedKey = localStorage.getItem("gemini_api_key");
+    const input = document.getElementById("apiKeyInput");
+    
+    if (input && savedKey) {
+        input.value = savedKey;
+    }
+    
+    modal.style.display = "flex";
+    input?.focus();
+}
+
+/**
+ * Close the API Key modal dialog
+ */
+function closeAPIKeyModal() {
+    const modal = document.getElementById("apiKeyModal");
+    if (modal) {
+        modal.style.display = "none";
+    }
+    clearAPIKeyStatus();
+}
+
+/**
+ * Toggle password visibility in API Key input
+ */
+function togglePasswordVisibility() {
+    const input = document.getElementById("apiKeyInput");
+    const btn = document.querySelector(".toggle-password-btn");
+    
+    if (!input || !btn) return;
+    
+    if (input.type === "password") {
+        input.type = "text";
+        btn.innerHTML = '<i class="fa-solid fa-eye-slash"></i>';
+    } else {
+        input.type = "password";
+        btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
+    }
+}
+
+/**
+ * Test the Gemini API key
+ */
+async function testAPIKey() {
+    const input = document.getElementById("apiKeyInput");
+    if (!input || !input.value.trim()) {
+        showAPIKeyStatus("Vui lòng nhập API Key trước khi kiểm tra", "warning");
+        return;
+    }
+    
+    const testBtn = document.getElementById("testKeyBtn");
+    if (testBtn) testBtn.disabled = true;
+    
+    showAPIKeyStatus("Đang kiểm tra API Key...", "loading");
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/ai/test-key`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                api_key: input.value.trim()
+            })
+        });
+        
+        if (response.ok) {
+            showAPIKeyStatus("✓ API Key hợp lệ! Bạn có thể sử dụng tính năng Phối Màu AI.", "success");
+        } else {
+            const data = await response.json();
+            showAPIKeyStatus(`✗ ${data.error || "API Key không hợp lệ"}`, "error");
+        }
+    } catch (error) {
+        console.error("Error testing API key:", error);
+        showAPIKeyStatus("✗ Lỗi kết nối. Vui lòng thử lại.", "error");
+    } finally {
+        if (testBtn) testBtn.disabled = false;
+    }
+}
+
+/**
+ * Save the API Key to localStorage
+ */
+async function saveAPIKey() {
+    const input = document.getElementById("apiKeyInput");
+    if (!input || !input.value.trim()) {
+        showAPIKeyStatus("Vui lòng nhập API Key", "warning");
+        return;
+    }
+    
+    // Save to localStorage
+    localStorage.setItem("gemini_api_key", input.value.trim());
+    
+    showAPIKeyStatus("✓ API Key đã được lưu thành công!", "success");
+    
+    // Close modal after 2 seconds
+    setTimeout(() => {
+        closeAPIKeyModal();
+    }, 2000);
+}
+
+/**
+ * Load API Key from localStorage and use it in fetch requests
+ */
+function loadAPIKey() {
+    const apiKey = localStorage.getItem("gemini_api_key");
+    // Store in state for use in API calls
+    if (apiKey) {
+        state.apiKey = apiKey;
+    }
+}
+
+/**
+ * Show status message in modal
+ */
+function showAPIKeyStatus(message, type = "info") {
+    const statusEl = document.getElementById("apiKeyStatus");
+    if (!statusEl) return;
+    
+    // Remove all status classes
+    statusEl.classList.remove("success", "error", "warning", "loading");
+    
+    // Add the appropriate class
+    statusEl.classList.add(type);
+    
+    // Set message with icon
+    let icon = "ℹ️";
+    if (type === "success") icon = "✓";
+    else if (type === "error") icon = "✗";
+    else if (type === "warning") icon = "⚠️";
+    else if (type === "loading") icon = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    
+    statusEl.innerHTML = `${icon} ${message}`;
+}
+
+/**
+ * Clear API Key status message
+ */
+function clearAPIKeyStatus() {
+    const statusEl = document.getElementById("apiKeyStatus");
+    if (statusEl) {
+        statusEl.innerHTML = "";
+        statusEl.classList.remove("success", "error", "warning", "loading");
+    }
+}
+
+/**
+ * Enhanced fetch wrapper that includes API key if available
+ */
+async function fetchWithAPIKey(url, options = {}) {
+    const apiKey = localStorage.getItem("gemini_api_key");
+    
+    // Prepare request body
+    const body = options.body ? JSON.parse(options.body) : {};
+    
+    // Add API key to request if available
+    if (apiKey && url.includes("/api/ai/")) {
+        body.api_key = apiKey;
+    }
+    
+    // Update options
+    options.body = JSON.stringify(body);
+    
+    return fetch(url, options);
 }
 
 // Start visualizer on browser load

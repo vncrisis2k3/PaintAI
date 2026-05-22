@@ -112,6 +112,10 @@
                     </div>
                     
                     <div class="header-right-controls">
+                        <button class="header-api-key-btn" onclick="openAPIKeyModal()" title="Cấu hình API Key">
+                            <i class="fa-solid fa-key"></i>
+                            <span>API Key</span>
+                        </button>
                         <button class="header-start-btn" onclick="document.getElementById('tab-ai').click()">
                             <i class="fa-solid fa-wand-magic-sparkles"></i>
                             <span>Start Painting</span>
@@ -588,6 +592,58 @@
         });
     </script>
     <script src="/static/app.js"></script>
+
+    <!-- ==================== API KEY MODAL ==================== -->
+    <div id="apiKeyModal" class="modal-overlay" style="display: none;" onclick="if(event.target === this) closeAPIKeyModal()">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-key"></i> Cấu hình Gemini API Key</h2>
+                <button class="modal-close" onclick="closeAPIKeyModal()">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="modal-section">
+                    <p class="modal-description">
+                        Nhập Gemini API Key của bạn để sử dụng tính năng Phối Màu AI. 
+                        <a href="https://ai.google.dev/" target="_blank" class="modal-link">
+                            Lấy API Key miễn phí tại đây <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                        </a>
+                    </p>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="apiKeyInput" class="modal-label">API Key:</label>
+                    <div class="api-key-input-wrapper">
+                        <input 
+                            type="password" 
+                            id="apiKeyInput" 
+                            class="api-key-input" 
+                            placeholder="Paste your Gemini API Key here..."
+                        >
+                        <button class="toggle-password-btn" onclick="togglePasswordVisibility()">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <small class="modal-hint">🔒 API Key được lưu an toàn trong trình duyệt của bạn (localStorage). Không gửi đến máy chủ.</small>
+                </div>
+
+                <div class="modal-status" id="apiKeyStatus"></div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeAPIKeyModal()">Hủy</button>
+                <button class="btn-primary" onclick="saveAPIKey()">
+                    <i class="fa-solid fa-check"></i> Lưu
+                </button>
+                <button class="btn-outline" onclick="testAPIKey()" id="testKeyBtn">
+                    <i class="fa-solid fa-flask"></i> Kiểm tra
+                </button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
 
