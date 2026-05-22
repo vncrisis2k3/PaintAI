@@ -215,7 +215,7 @@ console.log(state.aiColorTool.uploadedImage?.length);
 ### Danh Mục Loại Công Trình
 - Biệt thự
 - Nhà phố
-- Chung cư
+- Chung cư.
 - Nhà vườn
 - v.v.
 
