@@ -1,204 +1,132 @@
 #!/usr/bin/env python3
 """
-Image Painting Module - Quick Fix
-Sử dụng PIL để áp dụng màu sơn lên ảnh
-Thay thế cho Gemini API vì Gemini không hỗ trợ image editing
+Image Painting Module
+Sử dụng Pillow để áp dụng màu sơn lên ảnh mà không phụ thuộc numpy.
 """
 
 import base64
 import io
-from typing import Dict
-from PIL import Image, ImageEnhance, ImageFilter
-import numpy as np
+from typing import Dict, Optional
 
-def hex_to_rgb(hex_color: str) -> tuple:
-    """Convert hex color to RGB tuple"""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+def _load_pil():
+    try:
+        from PIL import Image, ImageEnhance, ImageDraw
+        return Image, ImageEnhance, ImageDraw
+    except ImportError:
+        return None
+
+
+def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """Convert hex color to RGB tuple."""
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _decode_image(image_base64: str):
+    pil = _load_pil()
+    if pil is None:
+        return None
+    Image, _, _ = pil
+    if "," in image_base64:
+        _, base64_data = image_base64.split(",", 1)
+    else:
+        base64_data = image_base64
+
+    image_bytes = base64.b64decode(base64_data)
+    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+
+def _encode_image(image) -> str:
+    output_bytes = io.BytesIO()
+    image.save(output_bytes, format="PNG")
+    result_base64 = base64.b64encode(output_bytes.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{result_base64}"
+
 
 def apply_paint_color_simple(image_base64: str, paint_areas: Dict[str, str], project_type: str) -> str:
-    """
-    Apply paint colors to image using PIL
-    This is a simple implementation that applies color overlay
-    
-    Args:
-        image_base64: Base64 encoded image with or without data URI prefix
-        paint_areas: Dict mapping area names to hex colors
-        project_type: "interior" or "exterior"
-    
-    Returns:
-        Base64 encoded modified image
-    """
-    
+    """Apply a simple whole-image color blend."""
+
     try:
-        # Decode base64 image
-        if "," in image_base64:
-            header, base64_data = image_base64.split(",", 1)
-        else:
-            base64_data = image_base64
-        
-        image_bytes = base64.b64decode(base64_data)
-        original_image = Image.open(io.BytesIO(image_bytes))
-        
-        # Convert to RGB if needed
-        if original_image.mode == 'RGBA':
-            rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
-            rgb_image.paste(original_image, mask=original_image.split()[3] if len(original_image.split()) == 4 else None)
-            working_image = rgb_image
-        else:
-            working_image = original_image.convert('RGB')
-        
-        # Create output image
+        pil = _load_pil()
+        if pil is None:
+            return image_base64
+        Image, ImageEnhance, _ = pil
+
+        working_image = _decode_image(image_base64)
+        if working_image is None:
+            return image_base64
+        if not paint_areas:
+            return image_base64
+
         result_image = working_image.copy()
-        result_array = np.array(result_image, dtype=np.float32)
-        
-        # Apply color overlay with weighted average
-        # This creates a "painted" effect
-        average_color = np.mean(result_array, axis=(0, 1))
-        
-        for area_name, hex_color in paint_areas.items():
-            rgb_color = hex_to_rgb(hex_color)
-            
-            # Simple approach: blend the average color with paint color
-            # Percentage to blend (0.3 = 30% paint color, 70% original)
-            blend_ratio = 0.4
-            
-            # Apply color shift
-            result_array = result_array * (1 - blend_ratio) + np.array(rgb_color) * blend_ratio
-        
-        # Normalize and convert back
-        result_array = np.clip(result_array, 0, 255).astype(np.uint8)
-        result_image = Image.fromarray(result_array)
-        
-        # Enhance contrast slightly
-        enhancer = ImageEnhance.Contrast(result_image)
-        result_image = enhancer.enhance(1.1)
-        
-        # Encode result
-        output_bytes = io.BytesIO()
-        result_image.save(output_bytes, format='PNG')
-        result_base64 = base64.b64encode(output_bytes.getvalue()).decode('utf-8')
-        
-        return f"data:image/png;base64,{result_base64}"
-        
+        for _, hex_color in paint_areas.items():
+            overlay = Image.new("RGB", result_image.size, hex_to_rgb(hex_color))
+            result_image = Image.blend(result_image, overlay, 0.35)
+
+        result_image = ImageEnhance.Contrast(result_image).enhance(1.1)
+        return _encode_image(result_image)
     except Exception as e:
         print(f"Error in apply_paint_color_simple: {e}")
-        # Return original if error
         return image_base64
 
+
 def apply_paint_color_advanced(image_base64: str, paint_areas: Dict[str, str], project_type: str) -> str:
-    """
-    Apply paint colors ONLY to main wall regions, preserve sky/vegetation/background.
-    
-    Strategy for EXTERIOR:
-    1. Detect sky region (top ~20-30%)
-    2. Detect ground/foreground region (bottom ~10-20%)
-    3. Paint ONLY middle region (main walls)
-    4. Apply color blending with texture preservation
-    
-    Strategy for INTERIOR:
-    1. Paint main surfaces (walls)
-    2. Preserve windows, fixtures, furniture
-    """
+    """Apply color to the most likely wall region while preserving the rest."""
+
     try:
-        # Decode base64 image
-        if "," in image_base64:
-            header, base64_data = image_base64.split(",", 1)
-        else:
-            base64_data = image_base64
-        
-        image_bytes = base64.b64decode(base64_data)
-        original_image = Image.open(io.BytesIO(image_bytes))
-        
-        if original_image.mode == 'RGBA':
-            rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
-            rgb_image.paste(original_image, mask=original_image.split()[3])
-            working_image = rgb_image
-        else:
-            working_image = original_image.convert('RGB')
-        
-        height, width = working_image.size[::-1]  # Get height, width properly
-        result_array = np.array(working_image, dtype=np.float32)
-        
-        # Get primary paint color (first color is usually main wall)
-        paint_colors = list(paint_areas.items())
-        if len(paint_colors) == 0:
+        pil = _load_pil()
+        if pil is None:
             return image_base64
-        
-        primary_area_name, primary_hex = paint_colors[0]
-        primary_rgb = np.array(hex_to_rgb(primary_hex), dtype=np.float32)
-        
-        # Region detection for EXTERIOR buildings
+        Image, ImageEnhance, ImageDraw = pil
+
+        working_image = _decode_image(image_base64)
+        if working_image is None:
+            return image_base64
+        width, height = working_image.size
+
+        paint_colors = list(paint_areas.items())
+        if not paint_colors:
+            return image_base64
+
+        result_image = working_image.copy()
+        primary_rgb = hex_to_rgb(paint_colors[0][1])
+
         if project_type == "exterior":
-            # Assume: sky at top, walls in middle, ground at bottom
-            sky_height = int(height * 0.25)      # Top 25% = sky
-            wall_height = int(height * 0.65)     # Middle 65% = main walls (PAINT THIS)
-            ground_height = height - sky_height - wall_height  # Bottom = ground
-            
-            # Paint ONLY the wall region
+            sky_height = int(height * 0.25)
+            wall_height = int(height * 0.65)
             wall_start = sky_height
-            wall_end = sky_height + wall_height
-            
-            blend_ratio = 0.70  # 70% paint, 30% original texture
-            
-            # Apply color to wall region only
-            result_array[wall_start:wall_end, :, :] = (
-                result_array[wall_start:wall_end, :, :] * (1 - blend_ratio) + 
-                primary_rgb * blend_ratio
-            )
-            
-            # Apply secondary color if provided (accent/trim)
+            wall_end = min(height, sky_height + wall_height)
+
+            wall_overlay = Image.new("RGB", result_image.size, primary_rgb)
+            wall_mask = Image.new("L", result_image.size, 0)
+            ImageDraw.Draw(wall_mask).rectangle([0, wall_start, width, wall_end], fill=int(255 * 0.70))
+            result_image = Image.composite(wall_overlay, result_image, wall_mask)
+
             if len(paint_colors) > 1:
-                accent_area_name, accent_hex = paint_colors[1]
-                accent_rgb = np.array(hex_to_rgb(accent_hex), dtype=np.float32)
-                
-                # Apply accent to upper portion of wall (trim area)
-                trim_height = int(wall_height * 0.15)  # Top 15% of wall = trim
-                trim_end = wall_start + trim_height
-                
-                accent_blend = 0.65
-                result_array[wall_start:trim_end, :, :] = (
-                    result_array[wall_start:trim_end, :, :] * (1 - accent_blend) + 
-                    accent_rgb * accent_blend
-                )
-            
-            # ✅ SKY and GROUND regions are UNTOUCHED
-            
-        else:  # INTERIOR
-            # For interior, paint middle 60% (main wall area)
+                accent_rgb = hex_to_rgb(paint_colors[1][1])
+                trim_height = int(wall_height * 0.15)
+                trim_end = min(height, wall_start + trim_height)
+                accent_overlay = Image.new("RGB", result_image.size, accent_rgb)
+                accent_mask = Image.new("L", result_image.size, 0)
+                ImageDraw.Draw(accent_mask).rectangle([0, wall_start, width, trim_end], fill=int(255 * 0.65))
+                result_image = Image.composite(accent_overlay, result_image, accent_mask)
+        else:
             interior_start = int(height * 0.15)
             interior_end = int(height * 0.75)
-            
-            blend_ratio = 0.70
-            result_array[interior_start:interior_end, :, :] = (
-                result_array[interior_start:interior_end, :, :] * (1 - blend_ratio) + 
-                primary_rgb * blend_ratio
-            )
-        
-        # Normalize
-        result_array = np.clip(result_array, 0, 255).astype(np.uint8)
-        result_image = Image.fromarray(result_array)
-        
-        # Enhance saturation ONLY in painted regions (subtle enhancement)
-        saturation_enhancer = ImageEnhance.Color(result_image)
-        result_image = saturation_enhancer.enhance(1.15)  # +15% color saturation (subtle)
-        
-        # Enhance contrast slightly
-        contrast_enhancer = ImageEnhance.Contrast(result_image)
-        result_image = contrast_enhancer.enhance(1.08)  # +8% contrast
-        
-        # Encode
-        output_bytes = io.BytesIO()
-        result_image.save(output_bytes, format='PNG')
-        result_base64 = base64.b64encode(output_bytes.getvalue()).decode('utf-8')
-        
-        return f"data:image/png;base64,{result_base64}"
-        
+            interior_overlay = Image.new("RGB", result_image.size, primary_rgb)
+            interior_mask = Image.new("L", result_image.size, 0)
+            ImageDraw.Draw(interior_mask).rectangle([0, interior_start, width, interior_end], fill=int(255 * 0.70))
+            result_image = Image.composite(interior_overlay, result_image, interior_mask)
+
+        result_image = ImageEnhance.Color(result_image).enhance(1.15)
+        result_image = ImageEnhance.Contrast(result_image).enhance(1.08)
+        return _encode_image(result_image)
     except Exception as e:
         print(f"Error in apply_paint_color_advanced: {e}")
         return image_base64
 
+
 if __name__ == "__main__":
-    # Test the functions
     print("Testing image painting module...")
     print("✅ Module ready for use")

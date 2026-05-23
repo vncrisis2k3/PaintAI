@@ -2,7 +2,8 @@
 // ARCHICOLOR PRO - CORE FRONTEND SYSTEM
 // ==========================================================================
 
-const API_BASE = "";
+var API_BASE = window.API_BASE || "";
+window.API_BASE = API_BASE;
 
 // Global App State
 const state = {
@@ -567,14 +568,9 @@ function showToast(message, type = "success") {
 async function testAIKey() {
     try {
         const apiKey = localStorage.getItem("gemini_api_key");
-        const response = await fetch(`${API_BASE}/api/ai/test-key`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                api_key: apiKey || null
-            })
+        const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
+        const response = await fetch(`${API_BASE}/api/ai/test-key${query}`, {
+            method: 'GET'
         });
         const result = await response.json();
         
@@ -2091,25 +2087,17 @@ function togglePasswordVisibility() {
  */
 async function testAPIKey() {
     const input = document.getElementById("apiKeyInput");
-    if (!input || !input.value.trim()) {
-        showAPIKeyStatus("Vui lòng nhập API Key trước khi kiểm tra", "warning");
-        return;
-    }
-    
+
     const testBtn = document.getElementById("testKeyBtn");
     if (testBtn) testBtn.disabled = true;
     
     showAPIKeyStatus("Đang kiểm tra API Key...", "loading");
     
     try {
-        const response = await fetch(`${API_BASE}/api/ai/test-key`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                api_key: input.value.trim()
-            })
+        const apiKey = input?.value.trim() || localStorage.getItem("gemini_api_key") || "";
+        const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
+        const response = await fetch(`${API_BASE}/api/ai/test-key${query}`, {
+            method: "GET"
         });
         
         if (response.ok) {

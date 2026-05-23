@@ -817,14 +817,17 @@ class AIGenerateColorsRequest(BaseModel):
             raise ValueError("paintAreas cannot be empty - must have at least one color selection")
         return v
 
-@app.get("/api/ai/test-key")
-def test_gemini_key():
+class TestGeminiKeyRequest(BaseModel):
+    api_key: Optional[str] = Field(None, description="Optional Gemini API key")
+
+@app.api_route("/api/ai/test-key", methods=["GET", "POST"])
+def test_gemini_key(api_key: Optional[str] = Query(None), payload: Optional[TestGeminiKeyRequest] = None):
     """Test if Gemini API key is valid and accessible."""
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = api_key or (payload.api_key if payload else None) or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {
             "success": False,
-            "message": "GEMINI_API_KEY không được cấu hình trong .env"
+            "message": "Không tìm thấy API Key Gemini. Vui lòng cấu hình GEMINI_API_KEY hoặc nhập khóa trong phần cài đặt."
         }
     
     try:
