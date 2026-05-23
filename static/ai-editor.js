@@ -9,34 +9,36 @@ import ReactDOM from 'https://esm.sh/react-dom@19/client';
 // PHẦN 2: LOGIC PROMPT AI HỆ THỐNG (SYSTEM PROMPT) & GEMINI API INTEGRATION
 // ==========================================================================
 const SYSTEM_PROMPT = `
-You are an expert architectural color consultant and AI vision engineer.
-Your task is to analyze the provided image of a building and recommend a highly aesthetic, realistic paint color scheme.
-You must perform the following:
-1. Semantic Segmentation analysis: Identify the main walls, columns/pillars, cornice/trim, and roof outlines. You must preserve the window glass, doors, vegetation, sky, and original ambient lighting untouched.
-2. Advanced Texture Mapping guidance: Blend the target color paint code with the existing 3D shadows, light sources, and surface textures of the building. Maintain original roughness and specular highlights.
-3. Determine:
-   - The architectural style of the building (e.g., Modern Minimalist, Neoclassical, Nordic, Classical, Mid-century Modern).
-   - A primary paint color recommendation (paint name, brand, hex code).
-   - An accent paint color recommendation (paint name, brand, hex code).
-   - Detailed design reasoning explaining why this palette fits the architectural style and enhances curb appeal.
+You are a computer vision and architectural analysis engine integrated into a paint-coloring application.
 
-Your output must be a valid JSON object matching this schema:
+Return only one valid JSON object that matches this schema exactly:
 {
-  "architecturalStyle": "string",
-  "primaryPaint": {
-    "name": "string",
-    "brand": "string",
-    "hex": "string",
-    "paintCode": "string"
-  },
-  "accentPaint": {
-    "name": "string",
-    "brand": "string",
-    "hex": "string",
-    "paintCode": "string"
-  },
-  "designReasoning": "string"
+    "space_type": "exterior" | "interior",
+    "detected_areas": [
+        {
+            "id": "wall-main" | "trim" | "column" | "detail" | "accent" | "ceiling",
+            "name_vi": "string",
+            "box_2d": [ymin, xmin, ymax, xmax]
+        }
+    ],
+    "suggested_palettes": [
+        {
+            "style_name": "string",
+            "colors": {
+                "<area-id>": "#RRGGBB"
+            }
+        }
+    ]
 }
+
+Rules:
+- Detect whether the image is exterior or interior and set space_type accordingly.
+- Use only the allowed IDs for the detected space.
+- Provide normalized bounding boxes on a 0-1000 scale in [ymin, xmin, ymax, xmax] order.
+- Include at most 2 suggested palettes.
+- Use valid HEX colors only.
+- If an area is not visible, omit it.
+- Return JSON only, without markdown fences, explanations, or extra text.
 `;
 
 // ==========================================================================
@@ -586,7 +588,7 @@ function App() {
                 const ai = new GoogleGenAI({ apiKey });
 
                 const response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
+                    model: 'gemini-1.5-pro',
                     contents: [
                         { inlineData: { data: base64Data, mimeType: mimeType } },
                         'Perform automatic paint color scheme coordination for this house. Output JSON matching the specified instructions.'
@@ -598,7 +600,38 @@ function App() {
                 });
 
                 const parsedReport = JSON.parse(response.text);
-                setAiReport(parsedReport);
+
+                const normalizeReport = (report) => {
+                    if (report.primaryPaint && report.accentPaint) {
+                        return report;
+                    }
+
+                    const palette = report.suggested_palettes?.[0] || { style_name: 'AI Gợi ý', colors: {} };
+                    const colors = palette.colors || {};
+                    const primaryHex = colors['wall-main'] || Object.values(colors)[0] || '#F4F5F6';
+                    const accentHex = colors['accent'] || colors['trim'] || colors['column'] || colors['detail'] || primaryHex;
+
+                    return {
+                        architecturalStyle: palette.style_name || report.space_type || 'AI Gợi ý',
+                        primaryPaint: {
+                            name: 'Primary Paint',
+                            brand: 'Gemini',
+                            hex: primaryHex,
+                            paintCode: primaryHex
+                        },
+                        accentPaint: {
+                            name: 'Accent Paint',
+                            brand: 'Gemini',
+                            hex: accentHex,
+                            paintCode: accentHex
+                        },
+                        designReasoning: `Phát hiện ${report.space_type || 'không gian'} với ${Array.isArray(report.detected_areas) ? report.detected_areas.length : 0} phân vùng có thể sơn.`,
+                        ...report
+                    };
+                };
+
+                const normalizedReport = normalizeReport(parsedReport);
+                setAiReport(normalizedReport);
 
                 // Apply the suggested colors to regions
                 const tempCanvas = document.createElement('canvas');
@@ -666,7 +699,7 @@ function App() {
                 };
 
                 if (activeSample) {
-                    applySeedColors(activeSample.seeds, parsedReport.primaryPaint.hex, parsedReport.accentPaint.hex);
+                    applySeedColors(activeSample.seeds, normalizedReport.primaryPaint.hex, normalizedReport.accentPaint.hex);
                 } else {
                     // Guess coordinates for custom uploads (Walls centered, Accent right, Trim bottom)
                     const centerSeeds = {
@@ -675,7 +708,7 @@ function App() {
                         roof: [{ x: Math.round(tempCanvas.width * 0.5), y: Math.round(tempCanvas.height * 0.25) }],
                         trim: [{ x: Math.round(tempCanvas.width * 0.3), y: Math.round(tempCanvas.height * 0.7) }]
                     };
-                    applySeedColors(centerSeeds, parsedReport.primaryPaint.hex, parsedReport.accentPaint.hex);
+                    applySeedColors(centerSeeds, normalizedReport.primaryPaint.hex, normalizedReport.accentPaint.hex);
                 }
 
                 saveHistory(nextColors, nextMasks);

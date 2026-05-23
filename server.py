@@ -5,7 +5,7 @@ import urllib.parse
 import io
 import json
 import base64
-from typing import Optional
+from typing import Optional, Any, Dict, List
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -634,56 +634,45 @@ def ai_colorize(payload: AIColorizeRequest):
         raise HTTPException(status_code=400, detail="Mã hóa ảnh Base64 không hợp lệ.")
 
     system_prompt = """
-You are an expert architectural color consultant and AI vision engineer specializing in semantic paint region analysis.
+You are a computer vision and architectural analysis engine integrated into a paint-coloring application.
 
-CRITICAL INSTRUCTION - Paint ONLY Wall Regions:
-========================================
-You must IDENTIFY and recommend colors for ONLY these regions:
-- Main building facade/walls
-- Trim, sills, lintels, cornices
-- Architectural accents (chosen surfaces only)
-
-You MUST NOT recommend painting:
-- Sky, clouds, atmosphere
-- Windows, glass, reflections
-- Vegetation, trees, landscaping
-- Ground, pavement, roads
-- Shadows (preserve depth and contrast)
-- Water elements
-- Foreground objects
-
-Your analysis MUST include:
-1. Architectural style (e.g., Modern Minimalist, Neoclassical, Nordic, Classical, Mid-century Modern)
-2. Primary paint color for MAIN WALLS ONLY
-3. Optional accent color for TRIM/SECONDARY architectural elements  
-4. Clear design reasoning that explains how the paint colors enhance the building without altering its surroundings
-
-Output MUST be valid JSON:
+Your task is to analyze the provided building image and return only a single valid JSON object that matches this schema exactly:
 {
-  "architecturalStyle": "string",
-  "primaryPaint": {
-    "name": "string (paint name)",
-    "brand": "string (manufacturer)",
-    "hex": "string (e.g., #FFFFFF)",
-    "paintCode": "string (product code)"
-  },
-  "accentPaint": {
-    "name": "string",
-    "brand": "string",
-    "hex": "string",
-    "paintCode": "string"
-  },
-  "designReasoning": "Explain how this color scheme enhances curb appeal while preserving the building's context and surroundings"
+  "space_type": "exterior" | "interior",
+  "detected_areas": [
+    {
+      "id": "wall-main" | "trim" | "column" | "detail" | "accent" | "ceiling",
+      "name_vi": "string",
+      "box_2d": [ymin, xmin, ymax, xmax]
+    }
+  ],
+  "suggested_palettes": [
+    {
+      "style_name": "string",
+      "colors": {
+        "<area-id>": "#RRGGBB"
+      }
+    }
+  ]
 }
+
+Rules:
+- Detect whether the image is exterior or interior and set space_type accordingly.
+- Use only the allowed IDs for the detected space.
+- For each detected area, provide a normalized bounding box on a 0-1000 scale in [ymin, xmin, ymax, xmax] order.
+- Include at most 2 suggested palettes.
+- Use valid HEX colors only.
+- If an area is not visible, omit it.
+- Return JSON only. Do not include markdown fences, comments, explanations, or extra text.
 """
 
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
 
     request_data = {
         "contents": [
             {
                 "parts": [
-                    {"text": "Analyze the building image and recommend the best paint colors according to system instructions."},
+                    {"text": "Analyze the building image and return the requested JSON schema with detected areas, normalized bounding boxes, and suggested palettes."},
                     {
                         "inlineData": {
                             "mimeType": mime_type,
@@ -794,6 +783,7 @@ class AIGenerateColorsRequest(BaseModel):
     image: str = Field(..., description="Base64 image data (required)")
     projectType: str = Field(..., description="'interior' or 'exterior' (required)")
     paintAreas: dict = Field(..., description="Color mapping: { 'area-id': 'hex-color' } (required)")
+    detected_areas: Optional[List[Dict[str, Any]]] = Field(None, description="Optional AI-detected bounding boxes")
     api_key: Optional[str] = Field(None, description="Optional Gemini API key")
     
     @field_validator('image')
@@ -831,7 +821,7 @@ def test_gemini_key(api_key: Optional[str] = Query(None), payload: Optional[Test
         }
     
     try:
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
         
         test_request = {
             "contents": [{
@@ -909,14 +899,22 @@ def ai_generate_colors(payload: AIGenerateColorsRequest):
     
     try:
         # Import the image painter module
-        from image_painter import apply_paint_color_advanced
+        from image_painter import apply_paint_color_ai, apply_paint_color_advanced
         
-        # Apply paint colors using PIL
-        result_image = apply_paint_color_advanced(
-            payload.image,
-            payload.paintAreas,
-            payload.projectType
-        )
+        # Prefer AI-detected bounding boxes when available, otherwise fallback to geometric masking
+        if payload.detected_areas:
+            result_image = apply_paint_color_ai(
+                payload.image,
+                payload.paintAreas,
+                payload.detected_areas,
+                payload.projectType
+            )
+        else:
+            result_image = apply_paint_color_advanced(
+                payload.image,
+                payload.paintAreas,
+                payload.projectType
+            )
         
         return {
             "success": True,

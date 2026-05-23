@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 Image Painting Module
-Sử dụng Pillow để áp dụng màu sơn lên ảnh mà không phụ thuộc numpy.
+Sử dụng Pillow để áp dụng màu sơn lên ảnh dựa trên tọa độ AI thông minh.
 """
 
 import base64
 import io
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Any
 
 
 def _load_pil():
     try:
-        from PIL import Image, ImageEnhance, ImageDraw
-        return Image, ImageEnhance, ImageDraw
+        # Tích hợp thêm ImageChops để xử lý hòa trộn đa lớp (Multiply/Overlay)
+        from PIL import Image, ImageEnhance, ImageDraw, ImageChops
+        return Image, ImageEnhance, ImageDraw, ImageChops
     except ImportError:
         return None
 
@@ -27,7 +28,7 @@ def _decode_image(image_base64: str):
     pil = _load_pil()
     if pil is None:
         return None
-    Image, _, _ = pil
+    Image, _, _, _ = pil
     if "," in image_base64:
         _, base64_data = image_base64.split(",", 1)
     else:
@@ -44,20 +45,98 @@ def _encode_image(image) -> str:
     return f"data:image/png;base64,{result_base64}"
 
 
-def apply_paint_color_simple(image_base64: str, paint_areas: Dict[str, str], project_type: str) -> str:
-    """Apply a simple whole-image color blend."""
-
+def apply_paint_color_ai(
+    image_base64: str,
+    paint_areas: Dict[str, str],
+    detected_areas: List[Dict[str, Any]],
+    project_type: str
+) -> str:
+    """
+    Hòa trộn màu sơn thông minh dựa trên tọa độ thực tế từ phân tích của Gemini.
+    Giữ lại kết cấu bề mặt kiến trúc và bóng đổ tự nhiên nhờ Pillow ImageChops.
+    """
     try:
         pil = _load_pil()
         if pil is None:
             return image_base64
-        Image, ImageEnhance, _ = pil
+        Image, ImageEnhance, ImageDraw, ImageChops = pil
 
         working_image = _decode_image(image_base64)
-        if working_image is None:
+        if working_image is None or not paint_areas or not detected_areas:
             return image_base64
-        if not paint_areas:
-            return image_base64
+
+        width, height = working_image.size
+
+        # Tạo một bản đồ tra cứu nhanh tọa độ từ danh sách Gemini trả về
+        # Cấu trúc: {"wall-main": [ymin, xmin, ymax, xmax]}
+        boxes_map = {}
+        for area in detected_areas:
+            if "id" in area and "box_2d" in area:
+                boxes_map[area["id"]] = area["box_2d"]
+
+        # Trích xuất ảnh xám (L) để làm bản đồ giữ độ sáng/bóng đổ (Shadow/Texture layer)
+        shadow_base = working_image.convert("L")
+
+        # Khởi tạo ảnh kết quả
+        result_image = working_image.copy()
+
+        # Duyệt qua từng vùng màu do người dùng chỉ định trên giao diện
+        for area_id, hex_color in paint_areas.items():
+            if area_id not in boxes_map:
+                continue
+
+            # Lấy và quy đổi tọa độ hệ 0-1000 của Gemini sang kích thước pixel thực tế
+            ymin_n, xmin_n, ymax_n, xmax_n = boxes_map[area_id]
+            ymin = int((ymin_n / 1000) * height)
+            xmin = int((xmin_n / 1000) * width)
+            ymax = int((ymax_n / 1000) * height)
+            xmax = int((xmax_n / 1000) * width)
+
+            # Đảm bảo không bị tràn pixel ra ngoài biên ảnh
+            ymin, ymax = max(0, ymin), min(height, ymax)
+            xmin, xmax = max(0, xmin), min(width, xmax)
+
+            if (xmax - xmin) <= 0 or (ymax - ymin) <= 0:
+                continue
+
+            target_rgb = hex_to_rgb(hex_color)
+
+            # Tạo lớp phủ màu sơn (Solid Color Layer) cho vùng cụ thể
+            paint_overlay = Image.new("RGB", result_image.size, target_rgb)
+
+            # Kỹ thuật Multiply Blend: Ép vân bề mặt và bóng đổ gốc vào lớp màu sơn mới
+            # Giúp lớp sơn tiệp hẳn vào thớ tường, không bị bệt phẳng lỳ như vẽ paint
+            blended_paint = ImageChops.multiply(paint_overlay, shadow_base.convert("RGB"))
+
+            # Tạo mặt nạ trong suốt để giới hạn vùng hiển thị sơn đúng theo Bounding Box
+            mask = Image.new("L", result_image.size, 0)
+            draw = ImageDraw.Draw(mask)
+
+            # fill=180 (tương đương ~70% opacity) tạo độ trong suốt nhẹ để giữ độ thực tế
+            draw.rectangle([xmin, ymin, xmax, ymax], fill=180)
+
+            # Đè lớp sơn thông minh lên ảnh hiện tại thông qua mặt nạ định vị
+            result_image = Image.composite(blended_paint, result_image, mask)
+
+        # Hậu kỳ: Tăng cường nhẹ độ tương phản để màu sơn kiến trúc tươi tắn và sắc nét hơn
+        result_image = ImageEnhance.Contrast(result_image).enhance(1.05)
+
+        return _encode_image(result_image)
+
+    except Exception as e:
+        print(f"Error in apply_paint_color_ai: {e}")
+        return image_base64
+
+
+def apply_paint_color_simple(image_base64: str, paint_areas: Dict[str, str], project_type: str) -> str:
+    """Giữ nguyên hàm gốc để làm fallback nếu không có tọa độ AI"""
+    try:
+        pil = _load_pil()
+        if pil is None: return image_base64
+        Image, ImageEnhance, _, _ = pil
+
+        working_image = _decode_image(image_base64)
+        if working_image is None or not paint_areas: return image_base64
 
         result_image = working_image.copy()
         for _, hex_color in paint_areas.items():
@@ -72,22 +151,18 @@ def apply_paint_color_simple(image_base64: str, paint_areas: Dict[str, str], pro
 
 
 def apply_paint_color_advanced(image_base64: str, paint_areas: Dict[str, str], project_type: str) -> str:
-    """Apply color to the most likely wall region while preserving the rest."""
-
+    """Giữ nguyên hàm gốc để làm chế độ dự phòng hình học"""
     try:
         pil = _load_pil()
-        if pil is None:
-            return image_base64
-        Image, ImageEnhance, ImageDraw = pil
+        if pil is None: return image_base64
+        Image, ImageEnhance, ImageDraw, _ = pil
 
         working_image = _decode_image(image_base64)
-        if working_image is None:
-            return image_base64
+        if working_image is None: return image_base64
         width, height = working_image.size
 
         paint_colors = list(paint_areas.items())
-        if not paint_colors:
-            return image_base64
+        if not paint_colors: return image_base64
 
         result_image = working_image.copy()
         primary_rgb = hex_to_rgb(paint_colors[0][1])
@@ -102,15 +177,6 @@ def apply_paint_color_advanced(image_base64: str, paint_areas: Dict[str, str], p
             wall_mask = Image.new("L", result_image.size, 0)
             ImageDraw.Draw(wall_mask).rectangle([0, wall_start, width, wall_end], fill=int(255 * 0.70))
             result_image = Image.composite(wall_overlay, result_image, wall_mask)
-
-            if len(paint_colors) > 1:
-                accent_rgb = hex_to_rgb(paint_colors[1][1])
-                trim_height = int(wall_height * 0.15)
-                trim_end = min(height, wall_start + trim_height)
-                accent_overlay = Image.new("RGB", result_image.size, accent_rgb)
-                accent_mask = Image.new("L", result_image.size, 0)
-                ImageDraw.Draw(accent_mask).rectangle([0, wall_start, width, trim_end], fill=int(255 * 0.65))
-                result_image = Image.composite(accent_overlay, result_image, accent_mask)
         else:
             interior_start = int(height * 0.15)
             interior_end = int(height * 0.75)
