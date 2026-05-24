@@ -465,7 +465,7 @@ async function aiGenerateColors() {
             image: image,
             projectType: type,
             paintAreas: colors,
-            api_key: localStorage.getItem("gemini_api_key") || null
+            detectedAreas: window.globalDetectedAreas || []
         };
         
         console.log('📤 Request Payload Debug:', {
@@ -473,7 +473,8 @@ async function aiGenerateColors() {
             imageSizeKB: Math.round(payload.image.length / 1024),
             paintAreasKeys: Object.keys(payload.paintAreas),
             paintAreasCount: Object.keys(payload.paintAreas).length,
-            paintAreasData: payload.paintAreas
+            paintAreasData: payload.paintAreas,
+            detectedAreasCount: Array.isArray(payload.detectedAreas) ? payload.detectedAreas.length : 0
         });
         
         const response = await fetch(`${API_BASE}/api/ai/generate-colors`, {
@@ -522,7 +523,7 @@ async function aiGenerateColors() {
             document.getElementById('ai-preview-status').textContent = '👉 Kéo thanh để so sánh ảnh gốc và ảnh phối màu';
             showToast('✨ Ảnh phối màu đã được tạo thành công!', 'success');
         } else {
-            const errorMsg = result.message || result.error_type || 'Không thể tạo ảnh phối màu';
+            const errorMsg = result.detail || result.message || result.error_type || 'Không thể tạo ảnh phối màu';
             console.error('API Error:', errorMsg);
             showToast('❌ ' + errorMsg, 'error');
             

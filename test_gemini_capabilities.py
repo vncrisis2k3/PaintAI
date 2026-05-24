@@ -80,7 +80,7 @@ Return ONLY the modified image in base64 PNG format. NO text, NO explanation."""
     }
     
     try:
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={API_KEY}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={API_KEY}"
         
         req = urllib.request.Request(
             gemini_url,

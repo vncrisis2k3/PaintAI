@@ -666,7 +666,7 @@ Rules:
 - Return JSON only. Do not include markdown fences, comments, explanations, or extra text.
 """
 
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={api_key}"
 
     request_data = {
         "contents": [
@@ -783,7 +783,7 @@ class AIGenerateColorsRequest(BaseModel):
     image: str = Field(..., description="Base64 image data (required)")
     projectType: str = Field(..., description="'interior' or 'exterior' (required)")
     paintAreas: dict = Field(..., description="Color mapping: { 'area-id': 'hex-color' } (required)")
-    detected_areas: Optional[List[Dict[str, Any]]] = Field(None, description="Optional AI-detected bounding boxes")
+    detectedAreas: Optional[List[Dict[str, Any]]] = Field(default=[], description="Optional AI-detected bounding boxes")
     api_key: Optional[str] = Field(None, description="Optional Gemini API key")
     
     @field_validator('image')
@@ -821,7 +821,7 @@ def test_gemini_key(api_key: Optional[str] = Query(None), payload: Optional[Test
         }
     
     try:
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={api_key}"
         
         test_request = {
             "contents": [{
@@ -897,44 +897,41 @@ def ai_generate_colors(payload: AIGenerateColorsRequest):
     - Custom ControlNet for precise area targeting
     """
     
+    # Strict behavior: require AI-detected areas. Do NOT fallback to geometric masking.
+    # If detectedAreas is missing or empty, raise a 400 so frontend shows a clear message to user.
+    if not payload.detectedAreas or len(payload.detectedAreas) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Không thể phối màu do hệ thống không nhận được dữ liệu phân vùng từ AI "
+                "(Có thể do hết hạn mức API hoặc Key lỗi). Vui lòng kiểm tra lại!"
+            )
+        )
+
     try:
-        # Import the image painter module
-        from image_painter import apply_paint_color_ai, apply_paint_color_advanced
-        
-        # Prefer AI-detected bounding boxes when available, otherwise fallback to geometric masking
-        if payload.detected_areas:
-            result_image = apply_paint_color_ai(
-                payload.image,
-                payload.paintAreas,
-                payload.detected_areas,
-                payload.projectType
-            )
-        else:
-            result_image = apply_paint_color_advanced(
-                payload.image,
-                payload.paintAreas,
-                payload.projectType
-            )
-        
+        # Import only the AI-based painter
+        from image_painter import apply_paint_color_ai
+
+        result_image = apply_paint_color_ai(
+            payload.image,
+            payload.paintAreas,
+            payload.detectedAreas,
+            payload.projectType
+        )
+
         return {
             "success": True,
-            "data": {
-                "image": result_image
-            },
-            "message": "✨ Ảnh phối màu được tạo thành công (sử dụng PIL processing)",
-            "note": "Để có kết quả photorealistic hơn, hãy sử dụng Stable Diffusion hoặc DALL-E 3"
+            "image": result_image,
+            "data": {"image": result_image},
+            "message": "✨ Ảnh phối màu được tạo thành công (sử dụng AI-detected areas)",
         }
-        
+
     except ImportError:
-        return {
-            "success": False,
-            "message": "❌ Module image_painter chưa được cài đặt. Vui lòng tạo file image_painter.py"
-        }
+        raise HTTPException(status_code=500, detail="Module image_painter chưa được cài đặt.")
+    except HTTPException:
+        raise
     except Exception as e:
-        return {
-            "success": False,
-            "message": f"❌ Lỗi khi xử lý ảnh: {str(e)}"
-        }
+        raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý ảnh: {str(e)}")
 
 # ==========================================================================
 # STATIC FILE SERVING FOR SPA COMPATIBILITY

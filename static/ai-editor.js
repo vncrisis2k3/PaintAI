@@ -572,6 +572,7 @@ function App() {
     const runAIColorization = async () => {
         if (!imageSrc) return;
         setAnalyzing(true);
+        window.globalDetectedAreas = [];
 
         // Retrieve current active sample template seeds if applicable
         const activeSample = SAMPLE_IMAGES.find(s => s.src === imageSrc);
@@ -600,6 +601,9 @@ function App() {
                 });
 
                 const parsedReport = JSON.parse(response.text);
+                window.globalDetectedAreas = Array.isArray(parsedReport.detected_areas)
+                    ? parsedReport.detected_areas
+                    : [];
 
                 const normalizeReport = (report) => {
                     if (report.primaryPaint && report.accentPaint) {

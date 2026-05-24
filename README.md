@@ -1,13 +1,13 @@
 # PaintAI - Hệ Thống Phối Màu Kiến Trúc Thông Minh
 
-Ứng dụng web AI giúp tự động phân tách và phối màu sơn cho các công trình kiến trúc bằng công nghệ Google Gemini 2.5 Flash.
+Ứng dụng web AI giúp tự động phân tách và phối màu sơn cho các công trình kiến trúc bằng công nghệ Google Gemini 1.5 Pro.
 
 ## 🎯 Tính Năng Chính
 
 ✨ **Phối Màu AI Thông Minh**
 - Upload ảnh công trình (nội thất/ngoại thất)
-- AI tự động phân tách các vùng cần sơn
-- Gợi ý màu sơn phù hợp với phong cách kiến trúc
+- AI phát hiện vùng kiến trúc có thể sơn và trả về bounding box chuẩn hóa
+- Gợi ý màu sơn phù hợp theo từng vùng và phong cách kiến trúc
 
 🎨 **Thư Viện Mẫu Công Trình**
 - Xem trước 100+ mẫu nhà mẫu
@@ -31,6 +31,8 @@
 ```bash
 pip install -r requirements.txt
 ```
+
+> Lưu ý: dự án hiện đã được kiểm tra với Python 3.14 trong `.venv`. Nên dùng đúng virtual environment của dự án khi chạy local.
 
 ### 2. Tạo File .env
 
@@ -106,9 +108,18 @@ POST /api/ai/generate-colors     # Tạo ảnh phối màu
     "accent": "#FF5733",
     "ceiling": "#2E8B57"
   },
+  "detected_areas": [
+    {
+      "id": "wall-main",
+      "name_vi": "Tường chính",
+      "box_2d": [250, 100, 900, 900]
+    }
+  ],
   "api_key": null
 }
 ```
+
+`detected_areas` là dữ liệu tùy chọn từ bước phân tích AI. Nếu có bounding box, backend sẽ tô màu theo tọa độ; nếu không có, hệ thống sẽ fallback sang chế độ tô hình học cũ.
 
 ### Proxy
 
@@ -124,7 +135,7 @@ GET /api/proxy-image?url=...     # Bypass CORS cho ảnh
 | **Frontend** | Vanilla JavaScript + HTML5 Canvas |
 | **Database** | SQLite3 |
 | **Styling** | CSS3 + Tailwind CSS |
-| **AI** | Google Gemini 2.5 Flash API |
+| **AI** | Google Gemini 1.5 Pro API |
 | **Server** | Uvicorn |
 
 ## 🔧 Cấu Hình
@@ -177,6 +188,11 @@ console.log(state.aiColorTool.uploadedImage?.length);
 2. Thêm: `GEMINI_API_KEY=your_key_here`
 3. Restart server
 
+**Lưu ý khi deploy Vercel:**
+- Nếu nhập API key trên giao diện, key đó được lưu trong `localStorage` của trình duyệt và chỉ dùng cho phiên làm việc đó.
+- Nếu không có key trong giao diện, backend sẽ dùng `GEMINI_API_KEY` từ biến môi trường trên Vercel.
+- Muốn đổi key mặc định cho toàn bộ site, hãy cập nhật biến môi trường trên Vercel, không phải trong file `.env` local.
+
 ### Ảnh không hiển thị
 
 **Giải pháp:** Dùng endpoint proxy:
@@ -204,6 +220,8 @@ console.log(state.aiColorTool.uploadedImage?.length);
 - Click "Tạo ảnh phối màu"
 - Đợi AI xử lý (khoảng 30 giây)
 - Kéo thanh để so sánh ảnh gốc và kết quả
+
+Ở chế độ mới, hệ thống có thể nhận `detected_areas` từ Gemini để tô theo vùng kiến trúc thực tế thay vì chỉ phủ màu theo khung hình học.
 
 ### Bước 5: Lưu Thiết Kế
 - Click "Lưu thiết kế"
