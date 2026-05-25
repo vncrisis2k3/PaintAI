@@ -182,6 +182,15 @@ function App() {
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
     const sliderContainerRef = useRef(null);
+    
+    const findPaletteColorByHex = useCallback((hex) => {
+        if (!hex) return null;
+        for (const group of Object.values(PALETTE_GROUPS)) {
+            const color = group.colors.find(item => item.hex.toLowerCase() === hex.toLowerCase());
+            if (color) return color;
+        }
+        return null;
+    }, []);
 
     // Load API key from localstorage
     useEffect(() => {
@@ -1088,7 +1097,13 @@ function App() {
                                         return (
                                             <button 
                                                 key={key}
-                                                onClick={() => setActiveRegion(key)}
+                                                onClick={() => {
+                                                    setActiveRegion(key);
+                                                    const regionColor = findPaletteColorByHex(appliedColors[key]);
+                                                    if (regionColor) {
+                                                        setSelectedColor(regionColor);
+                                                    }
+                                                }}
                                                 className={`p-2 border rounded-lg flex items-center justify-between text-left transition duration-200 ${isActive ? 'border-indigo-500 bg-indigo-500/5 shadow-sm' : 'border-slate-800 bg-slate-900/30'}`}
                                             >
                                                 <span className="text-[10px] font-bold text-slate-200">
@@ -1147,7 +1162,10 @@ function App() {
                                     const isApplied = aiMode === 'manual' 
                                         ? appliedColors[activeRegion] === color.hex
                                         : Object.values(appliedColors).includes(color.hex);
-                                    const isSelected = selectedColor.code === color.code;
+                                    const activeRegionColor = aiMode === 'manual' ? appliedColors[activeRegion] : null;
+                                    const isSelected = activeRegionColor
+                                        ? activeRegionColor === color.hex
+                                        : selectedColor.code === color.code;
 
                                     return (
                                         <button 

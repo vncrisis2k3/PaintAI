@@ -57,7 +57,12 @@ const state = {
         uploadedImage: null, // base64 or blob
         selectedPart: "wall-main",
         selectedColor: null,
-        selectedColors: {}
+        selectedColors: {},
+        detectedAreasRequestKey: null,
+        imageId: null,
+        lastClick: null,
+        areaClicks: {},
+        isProcessing: false
     }
 };
 
@@ -147,22 +152,137 @@ function debounce(func, wait) {
     };
 }
 
+function aiCompressImageDataUrl(dataUrl, maxDimension = 1600, quality = 0.88) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+            if (scale >= 1 && dataUrl.length < 2.5 * 1024 * 1024) {
+                resolve(dataUrl);
+                return;
+            }
+            
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+}
+
+function ensureAiProcessingOverlay() {
+    const viewport = document.querySelector(".ai-preview-viewport");
+    if (!viewport) return null;
+    
+    let overlay = document.getElementById("ai-processing-overlay");
+    if (!overlay) {
+        overlay = document.createElement("div");
+        overlay.id = "ai-processing-overlay";
+        overlay.className = "ai-processing-overlay";
+        overlay.setAttribute("aria-live", "polite");
+        overlay.setAttribute("aria-hidden", "true");
+        overlay.innerHTML = `
+            <div class="ai-processing-box">
+                <i class="fa-solid fa-spinner fa-spin"></i>
+                <span>AI loading</span>
+            </div>
+        `;
+        viewport.appendChild(overlay);
+    }
+    return overlay;
+}
+
+function setAiProcessing(isProcessing) {
+    state.aiColorTool.isProcessing = isProcessing;
+    const viewport = document.querySelector(".ai-preview-viewport");
+    const overlay = ensureAiProcessingOverlay();
+    const generateBtn = document.querySelector(".btn-generate");
+    const refreshBtn = document.querySelector(".btn-refresh");
+    const addImageBtn = document.querySelector(".btn-add-image");
+    const fileInput = document.getElementById("ai-file-input");
+    
+    viewport?.classList.toggle("ai-processing", isProcessing);
+    if (overlay) overlay.setAttribute("aria-hidden", String(!isProcessing));
+    if (generateBtn) generateBtn.disabled = isProcessing;
+    if (refreshBtn) refreshBtn.disabled = isProcessing;
+    if (addImageBtn) addImageBtn.disabled = isProcessing;
+    if (fileInput) fileInput.disabled = isProcessing;
+    
+    document.querySelectorAll(".type-button, .color-part-item, .color-palette-item").forEach(el => {
+        if ("disabled" in el) el.disabled = isProcessing;
+        el.classList.toggle("is-disabled", isProcessing);
+    });
+}
+
+function aiChooseAnotherImage() {
+    if (state.aiColorTool.isProcessing) {
+        showToast('AI đang xử lý, vui lòng chờ kết quả.', 'error');
+        return;
+    }
+
+    const fileInput = document.getElementById("ai-file-input");
+    if (!fileInput) return;
+
+    fileInput.value = "";
+    fileInput.click();
+}
+
 // ==========================================================================
 // AI COLOR TOOL FUNCTIONS
 // ==========================================================================
 const paintAreas = {
     interior: [
-        { id: 'wall-main', label: 'Màu tường chính' },
-        { id: 'accent', label: 'Màu tường nhấn' },
-        { id: 'ceiling', label: 'Màu trần nhà' }
+        { id: 'wall-main', label: 'Màu tường chính', aiLabel: 'main wall / primary interior wall surface / tường chính' },
+        { id: 'accent', label: 'Màu tường nhấn', aiLabel: 'accent wall / feature wall / tường nhấn' },
+        { id: 'ceiling', label: 'Màu trần nhà', aiLabel: 'ceiling paintable surface / trần nhà' }
     ],
     exterior: [
-        { id: 'wall-main', label: 'Màu tường chính' },
-        { id: 'trim', label: 'Màu phào chỉ' },
-        { id: 'column', label: 'Màu cột' },
-        { id: 'detail', label: 'Màu chi tiết' }
+        { id: 'wall-main', label: 'Màu tường chính', aiLabel: 'main exterior wall / facade wall paintable surface / tường chính mặt tiền' },
+        { id: 'trim', label: 'Màu phào chỉ', aiLabel: 'trim / molding / cornice / border / phào chỉ viền' },
+        { id: 'column', label: 'Màu cột', aiLabel: 'column / pillar / pilaster paintable surface / cột' },
+        { id: 'detail', label: 'Màu chi tiết', aiLabel: 'architectural detail / decorative detail / small paintable accent details / chi tiết kiến trúc' }
     ]
 };
+
+function aiGetAreaLabel(areaId) {
+    const type = state.aiColorTool.projectType;
+    const areas = paintAreas[type] || [];
+    const area = areas.find(item => item.id === areaId);
+    return area ? area.label : areaId;
+}
+
+function aiGetAreaPromptLabel(areaId) {
+    const type = state.aiColorTool.projectType;
+    const areas = paintAreas[type] || [];
+    const area = areas.find(item => item.id === areaId);
+    return area ? (area.aiLabel || area.label) : areaId;
+}
+
+function aiBuildRequestedAreas(colors) {
+    return Object.keys(colors).map(areaId => ({
+        id: areaId,
+        label: aiGetAreaPromptLabel(areaId),
+        displayLabel: aiGetAreaLabel(areaId),
+        hex: colors[areaId]
+    }));
+}
+
+function aiGetRequestedAreasKey(requestedAreas) {
+    return JSON.stringify(requestedAreas.map(area => [area.id, area.label]));
+}
+
+function aiUpdatePaletteSelection() {
+    const selectedHex = state.aiColorTool.selectedColors[state.aiColorTool.selectedPart] || null;
+    state.aiColorTool.selectedColor = selectedHex;
+    
+    document.querySelectorAll('.color-palette-item').forEach(item => {
+        item.classList.toggle('selected', !!selectedHex && item.dataset.hexColor === selectedHex);
+    });
+}
 
 function aiRenderPaintAreas(type) {
     const container = document.getElementById('ai-paint-areas');
@@ -172,13 +292,17 @@ function aiRenderPaintAreas(type) {
     container.innerHTML = '';
     
     areas.forEach((area, index) => {
-        const defaultColor = '#FFFFFF'; // Màu mặc định trắng
+        const selectedHex = state.aiColorTool.selectedColors[area.id];
+        const swatchStyle = selectedHex ? `background: ${selectedHex}; border: 1px solid #ccc;` : '';
+        const swatchClass = selectedHex ? 'color-swatch' : 'color-swatch unpainted';
         const btn = document.createElement('button');
         btn.className = `color-part-item ${index === 0 ? 'active' : ''}`;
+        btn.dataset.areaId = area.id;
         btn.onclick = function(e) { aiSelectPart(e.target.closest('.color-part-item'), area.id); };
         btn.innerHTML = `
             <span>${area.label}</span>
-            <div class="color-swatch" style="background: ${defaultColor}; border: 1px solid #ccc;"></div>
+            <div class="${swatchClass}" style="${swatchStyle}" title="${selectedHex || 'Chưa sơn'}"></div>
+            <small class="part-paint-status">${selectedHex || 'Chưa sơn'}</small>
         `;
         container.appendChild(btn);
     });
@@ -188,7 +312,8 @@ function aiRenderPaintAreas(type) {
     customBtn.className = 'color-part-item color-part-custom-trigger';
     customBtn.innerHTML = `
         <span>+ Tự nhập</span>
-        <div class="color-swatch" style="background: #d0d0d0;"></div>
+        <div class="color-swatch unpainted" title="Chưa sơn"></div>
+        <small class="part-paint-status">Chưa sơn</small>
     `;
     customBtn.onclick = function(e) { aiShowCustomInput(); };
     container.appendChild(customBtn);
@@ -214,7 +339,9 @@ function aiRenderPaintAreas(type) {
     
     // Set first area as selected and update the title
     state.aiColorTool.selectedPart = areas[0].id;
+    state.aiColorTool.selectedColor = state.aiColorTool.selectedColors[areas[0].id] || null;
     document.getElementById('ai-selected-part-name').textContent = areas[0].label;
+    aiUpdatePaletteSelection();
 }
 
 function aiShowCustomInput() {
@@ -250,9 +377,8 @@ function aiConfirmCustomInput() {
         paintAreas[type] = [];
     }
     paintAreas[type].push({ id: customId, label: customName });
-    
-    // Add to selectedColors with default white color
-    state.aiColorTool.selectedColors[customId] = '#FFFFFF';
+    window.globalDetectedAreas = [];
+    state.aiColorTool.detectedAreasRequestKey = null;
     
     // Re-render paint areas
     aiRenderPaintAreas(type);
@@ -261,7 +387,7 @@ function aiConfirmCustomInput() {
     aiCancelCustomInput();
     
     // Select the newly added custom area
-    const newBtn = document.querySelector('.color-part-item.active');
+    const newBtn = document.querySelector(`.color-part-item[data-area-id="${customId}"]`);
     if (newBtn) {
         aiSelectPart(newBtn, customId);
     }
@@ -273,6 +399,8 @@ function aiSetType(type) {
     console.log('aiSetType called with:', type);
     
     state.aiColorTool.projectType = type;
+    window.globalDetectedAreas = [];
+    state.aiColorTool.detectedAreasRequestKey = null;
     
     // Update UI - mark buttons
     document.querySelectorAll('.type-button').forEach(btn => {
@@ -287,14 +415,13 @@ function aiSetType(type) {
         }
     });
     
-    // Initialize selectedColors with default white (#FFFFFF) for all areas
+    // Start with no selected colors. White swatches are only visual defaults;
+    // untouched areas must not be sent to the painter.
     state.aiColorTool.selectedColors = {};
+    state.aiColorTool.areaClicks = {};
+    state.aiColorTool.lastClick = null;
     const areas = paintAreas[type] || paintAreas.interior;
     console.log('Paint areas for type:', type, areas);
-    
-    areas.forEach(area => {
-        state.aiColorTool.selectedColors[area.id] = '#FFFFFF'; // Màu mặc định trắng
-    });
     
     console.log('Initialized selectedColors:', state.aiColorTool.selectedColors);
     
@@ -330,6 +457,8 @@ function aiGoToStep(step) {
 
 function aiSelectPart(element, partId) {
     state.aiColorTool.selectedPart = partId;
+    state.aiColorTool.selectedColor = state.aiColorTool.selectedColors[partId] || null;
+    state.aiColorTool.lastClick = state.aiColorTool.areaClicks[partId] || null;
     
     // Update UI
     document.querySelectorAll('.color-part-item').forEach(btn => {
@@ -340,19 +469,193 @@ function aiSelectPart(element, partId) {
     // Update the selected part name
     const partLabel = element.querySelector('span').textContent;
     document.getElementById('ai-selected-part-name').textContent = partLabel;
+    
+    aiUpdatePaletteSelection();
 }
 
-function aiSelectColor(hexColor) {
+async function aiSelectColor(hexColor) {
     state.aiColorTool.selectedColor = hexColor;
     state.aiColorTool.selectedColors[state.aiColorTool.selectedPart] = hexColor;
+    window.globalDetectedAreas = [];
+    state.aiColorTool.detectedAreasRequestKey = null;
+    aiUpdatePaletteSelection();
     
     // Update color swatch in the parts list
     const partItem = document.querySelector('.color-part-item.active .color-swatch');
     if (partItem) {
         partItem.style.background = hexColor;
+        partItem.classList.remove('unpainted');
+        partItem.title = hexColor;
+    }
+    
+    const statusItem = document.querySelector('.color-part-item.active .part-paint-status');
+    if (statusItem) {
+        statusItem.textContent = hexColor;
+        statusItem.style.color = 'var(--color-primary)';
+    }
+
+    if (state.aiColorTool.imageId && state.aiColorTool.lastClick) {
+        await aiApplyPaintAtClick();
+        return;
+    }
+
+    if (state.aiColorTool.imageId) {
+        showToast('Da chon mau. Click vao vung tren anh de son ngay.', 'success');
+        return;
     }
     
     showToast('Đã chọn màu cho phần này', 'success');
+}
+
+const AI_DEFAULT_MASK_AREAS = [
+    { id: 'wall-main', label: 'Tuong chinh' },
+    { id: 'roof', label: 'Mai nha' },
+    { id: 'column', label: 'Cot' },
+    { id: 'trim', label: 'Chi nha / phao chi' },
+    { id: 'window-frame', label: 'Khung cua so' },
+    { id: 'door', label: 'Cua' },
+    { id: 'ceiling', label: 'Tran nha' },
+    { id: 'accent', label: 'Mang nhan / diem nhan' }
+];
+
+async function aiAnalyzeInitialMasks(imageDataUrl) {
+    const savedApiKey = localStorage.getItem("gemini_api_key");
+    const payload = {
+        image: imageDataUrl,
+        project_type: state.aiColorTool.projectType,
+        requested_areas: AI_DEFAULT_MASK_AREAS
+    };
+    if (savedApiKey) payload.api_key = savedApiKey;
+
+    const response = await fetch(`${API_BASE}/api/ai-colorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!result.success) {
+        throw new Error(result.detail || result.message || result.error_type || 'Khong the tao AI layer mask');
+    }
+    const data = result.data || {};
+    const detectedAreas = data.detected_areas || data.detectedAreas || [];
+    if (!Array.isArray(detectedAreas) || detectedAreas.length === 0) {
+        throw new Error('AI chua nhan dien duoc vung son de tao mask.');
+    }
+    window.globalDetectedAreas = detectedAreas;
+    state.aiColorTool.detectedAreasRequestKey = aiGetRequestedAreasKey(AI_DEFAULT_MASK_AREAS);
+    return detectedAreas;
+}
+
+async function aiCreatePaintSession(imageDataUrl, detectedAreas = []) {
+    const payload = { image: imageDataUrl };
+    if (Array.isArray(detectedAreas) && detectedAreas.length > 0) {
+        payload.detectedAreas = detectedAreas;
+    }
+    const response = await fetch(`${API_BASE}/api/upload-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!result.success) {
+        throw new Error(result.detail || result.message || 'Không thể tạo mask cho ảnh');
+    }
+    state.aiColorTool.imageId = result.image_id;
+    state.aiColorTool.lastClick = null;
+    return result;
+}
+
+function aiGetImageClickCoords(event, imageEl) {
+    const rect = imageEl.getBoundingClientRect();
+    const naturalWidth = imageEl.naturalWidth || imageEl.clientWidth;
+    const naturalHeight = imageEl.naturalHeight || imageEl.clientHeight;
+    const scale = Math.min(rect.width / naturalWidth, rect.height / naturalHeight);
+    const renderedWidth = naturalWidth * scale;
+    const renderedHeight = naturalHeight * scale;
+    const offsetX = (rect.width - renderedWidth) / 2;
+    const offsetY = (rect.height - renderedHeight) / 2;
+    const localX = event.clientX - rect.left - offsetX;
+    const localY = event.clientY - rect.top - offsetY;
+    const x = Math.round((localX / renderedWidth) * naturalWidth);
+    const y = Math.round((localY / renderedHeight) * naturalHeight);
+    return {
+        x: Math.max(0, Math.min(naturalWidth - 1, x)),
+        y: Math.max(0, Math.min(naturalHeight - 1, y))
+    };
+}
+
+function aiRegisterPaintClick(event) {
+    const imageEl = event.currentTarget;
+    if (!state.aiColorTool.imageId || !imageEl) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.aiColorTool.lastClick = aiGetImageClickCoords(event, imageEl);
+    state.aiColorTool.areaClicks[state.aiColorTool.selectedPart] = state.aiColorTool.lastClick;
+    if (state.aiColorTool.selectedColor) {
+        aiApplyPaintAtClick();
+        return;
+    }
+    document.getElementById('ai-preview-status').textContent = `Đã chọn vùng tại X:${state.aiColorTool.lastClick.x}, Y:${state.aiColorTool.lastClick.y}. Chọn màu rồi bấm tạo ảnh phối màu.`;
+    showToast('Đã chọn vùng cần sơn trên ảnh', 'success');
+}
+
+async function aiApplyPaintAtClick() {
+    if (state.aiColorTool.isProcessing) {
+        showToast('AI Ä‘ang xá»­ lÃ½, vui lÃ²ng chá» káº¿t quáº£.', 'error');
+        return;
+    }
+    if (!state.aiColorTool.imageId) {
+        showToast('Vui lòng tải ảnh lên trước.', 'error');
+        return;
+    }
+    if (!state.aiColorTool.lastClick) {
+        showToast('Vui lòng click trực tiếp vào vùng muốn sơn cho phần đang chọn.', 'error');
+        return;
+    }
+    if (!state.aiColorTool.selectedColor) {
+        showToast('Vui lòng chọn màu HEX trước khi sơn.', 'error');
+        return;
+    }
+
+    setAiProcessing(true);
+    showToast('Đang sơn vùng đã click bằng mask AI...', 'success');
+    try {
+        const response = await fetch(`${API_BASE}/api/apply-paint`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_id: state.aiColorTool.imageId,
+                x: state.aiColorTool.lastClick.x,
+                y: state.aiColorTool.lastClick.y,
+                color: state.aiColorTool.selectedColor
+            })
+        });
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.detail || result.message || result.error_type || 'Không thể sơn vùng đã chọn');
+        }
+
+        const originalImg = document.getElementById('ai-original-image');
+        const generatedImg = document.getElementById('ai-generated-image');
+        const comparisonContainer = document.getElementById('ai-comparison-container');
+        const previewPlaceholder = document.getElementById('ai-preview-placeholder');
+        const previewImage = document.getElementById('ai-preview-image');
+
+        if (originalImg) originalImg.src = state.aiColorTool.uploadedImage;
+        if (generatedImg) generatedImg.src = result.data?.image || result.image;
+        if (comparisonContainer) comparisonContainer.style.display = 'flex';
+        if (previewPlaceholder) previewPlaceholder.style.display = 'none';
+        if (previewImage) previewImage.style.display = 'none';
+        aiInitializeComparisonSlider();
+
+        document.getElementById('ai-preview-status').textContent = 'Đã sơn vùng click bằng mask đã tạo sẵn. Có thể click vùng khác và chọn màu tiếp.';
+        showToast('Ảnh phối màu đã được tạo thành công!', 'success');
+    } catch (error) {
+        console.error('Apply paint error:', error);
+        showToast('❌ ' + error.message, 'error');
+    } finally {
+        setAiProcessing(false);
+    }
 }
 
 async function aiLoadColors() {
@@ -361,20 +664,20 @@ async function aiLoadColors() {
     
     const renderColors = (colors) => {
         container.innerHTML = '';
-        colors.forEach((color, index) => {
+        colors.forEach((color) => {
             const btn = document.createElement('button');
-            btn.className = `color-palette-item ${index === 0 ? 'selected' : ''}`;
+            btn.className = 'color-palette-item';
             btn.style.background = color.hex_code;
+            btn.dataset.hexColor = color.hex_code;
             btn.title = `${color.paint_code} - ${color.hex_code}`;
             btn.textContent = color.paint_code;
             btn.onclick = function(e) {
                 e.preventDefault();
-                document.querySelectorAll('.color-palette-item').forEach(ci => ci.classList.remove('selected'));
-                btn.classList.add('selected');
                 aiSelectColor(color.hex_code);
             };
             container.appendChild(btn);
         });
+        aiUpdatePaletteSelection();
     };
     
     try {
@@ -422,6 +725,15 @@ async function aiLoadColors() {
 }
 
 async function aiGenerateColors() {
+    if (state.aiColorTool.imageId) {
+        return aiApplyPaintAtClick();
+    }
+
+    if (state.aiColorTool.isProcessing) {
+        showToast('AI đang xử lý, vui lòng chờ kết quả.', 'error');
+        return;
+    }
+    
     const type = state.aiColorTool.projectType;
     const image = state.aiColorTool.uploadedImage;
     const colors = state.aiColorTool.selectedColors;
@@ -447,7 +759,7 @@ async function aiGenerateColors() {
         return;
     }
     
-    const selectedCount = Object.keys(colors).length;
+    let selectedCount = Object.keys(colors).length;
     if (selectedCount === 0) {
         showToast('❌ Vui lòng chọn ít nhất một màu sơn cho vùng', 'error');
         console.error('No colors selected');
@@ -455,18 +767,68 @@ async function aiGenerateColors() {
     }
     
     // Show loading state
-    showToast('⏳ Đang tạo ảnh phối màu với Gemini AI...', 'success');
-    const generatingBtn = document.querySelector('.btn-generate');
-    if (generatingBtn) generatingBtn.disabled = true;
+    showToast('⏳ Đang phân tích vùng sơn bằng Gemini AI...', 'success');
+    setAiProcessing(true);
     
     try {
+        const requestedAreas = aiBuildRequestedAreas(colors);
+        const requestedAreasKey = aiGetRequestedAreasKey(requestedAreas);
+        let detectedAreas = (
+            state.aiColorTool.detectedAreasRequestKey === requestedAreasKey && Array.isArray(window.globalDetectedAreas)
+        ) ? window.globalDetectedAreas : [];
+        const savedApiKey = localStorage.getItem("gemini_api_key");
+        
+        // Analyze the uploaded image before painting. The backend refuses empty
+        // detectedAreas because an empty mask would force a broad geometric fill.
+        if (!detectedAreas.length) {
+            const analyzePayload = {
+                image: image,
+                project_type: type,
+                requested_areas: requestedAreas
+            };
+            if (savedApiKey) analyzePayload.api_key = savedApiKey;
+            
+            const analyzeResponse = await fetch(`${API_BASE}/api/ai-colorize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(analyzePayload)
+            });
+            const analyzeResult = await analyzeResponse.json();
+            console.log('🤖 AI colorize response:', analyzeResult);
+            console.log('🤖 AI colorize response JSON:', JSON.stringify(analyzeResult));
+            
+            if (!analyzeResult.success) {
+                const aiError = analyzeResult.detail || analyzeResult.message || analyzeResult.error_type || 'Không thể phân tích vùng sơn bằng AI';
+                showToast('❌ ' + aiError, 'error');
+                return;
+            }
+            
+            const aiData = analyzeResult.data || {};
+            detectedAreas = aiData.detected_areas || aiData.detectedAreas || [];
+            console.log('🎯 Detected paint areas:', detectedAreas);
+            window.globalDetectedAreas = detectedAreas;
+            state.aiColorTool.detectedAreasRequestKey = requestedAreasKey;
+            
+            if (aiData.space_type && aiData.space_type !== type) {
+                console.warn('AI space_type differs from user selection:', aiData.space_type, type);
+            }
+            
+            if (!detectedAreas.length) {
+                showToast('❌ AI chưa nhận diện được vùng có thể sơn trong ảnh này.', 'error');
+                return;
+            }
+        }
+        
+        showToast('⏳ Đang tạo ảnh phối màu với mask AI...', 'success');
+        
         // Build request payload
         const payload = {
             image: image,
             projectType: type,
             paintAreas: colors,
-            detectedAreas: window.globalDetectedAreas || []
+            detectedAreas: detectedAreas
         };
+        if (savedApiKey) payload.api_key = savedApiKey;
         
         console.log('📤 Request Payload Debug:', {
             projectType: payload.projectType,
@@ -474,6 +836,7 @@ async function aiGenerateColors() {
             paintAreasKeys: Object.keys(payload.paintAreas),
             paintAreasCount: Object.keys(payload.paintAreas).length,
             paintAreasData: payload.paintAreas,
+            requestedAreas: requestedAreas,
             detectedAreasCount: Array.isArray(payload.detectedAreas) ? payload.detectedAreas.length : 0
         });
         
@@ -489,6 +852,10 @@ async function aiGenerateColors() {
         const result = await response.json();
         console.log('📋 Full API Response:', result);
         console.log('API returned:', result.success ? 'SUCCESS' : 'FAILED', result.message || result.error_type);
+        
+        if (result.data && result.data.paint_meta) {
+            console.log('🎨 Paint meta:', result.data.paint_meta);
+        }
         
         if (result.details) {
             console.error('❌ Validation Errors:', result.details);
@@ -536,7 +903,7 @@ async function aiGenerateColors() {
         console.error('Network/Parse Error:', error);
         showToast('❌ Lỗi kết nối: ' + error.message, 'error');
     } finally {
-        if (generatingBtn) generatingBtn.disabled = false;
+        setAiProcessing(false);
     }
 }
 
@@ -1859,11 +2226,18 @@ function setupEventHandlers() {
     const aiFileInput = document.getElementById("ai-file-input");
     if (aiFileInput) {
         aiFileInput.addEventListener("change", (e) => {
+            if (state.aiColorTool.isProcessing) return;
             const file = e.target.files[0];
             if (file) {
                 const reader = new FileReader();
-                reader.onload = (event) => {
-                    state.aiColorTool.uploadedImage = event.target.result;
+                reader.onload = async (event) => {
+                    const compressedImage = await aiCompressImageDataUrl(event.target.result);
+                    state.aiColorTool.uploadedImage = compressedImage;
+                    window.globalDetectedAreas = [];
+                    state.aiColorTool.detectedAreasRequestKey = null;
+                    state.aiColorTool.imageId = null;
+                    state.aiColorTool.lastClick = null;
+                    state.aiColorTool.areaClicks = {};
                     
                     // Reset comparison slider
                     const comparisonContainer = document.getElementById('ai-comparison-container');
@@ -1876,7 +2250,7 @@ function setupEventHandlers() {
                     
                     // Show original image temporarily
                     if (previewImage) {
-                        previewImage.src = event.target.result;
+                        previewImage.src = compressedImage;
                         previewImage.style.display = 'block';
                     }
                     
@@ -1884,8 +2258,21 @@ function setupEventHandlers() {
                     if (previewControls) previewControls.style.display = 'flex';
                     
                     document.getElementById('ai-preview-status').textContent = 'Ảnh đã tải lên thành công. Chọn loại công trình.';
+                    setAiProcessing(true);
+                    showToast('Dang phan tich AI va tao layer mask...', 'success');
+                    let session;
+                    try {
+                        const detectedAreas = await aiAnalyzeInitialMasks(compressedImage);
+                        session = await aiCreatePaintSession(compressedImage, detectedAreas);
+                    } catch (error) {
+                        setAiProcessing(false);
+                        showToast('Loi: ' + error.message, 'error');
+                        return;
+                    }
+                    setAiProcessing(false);
                     aiGoToStep(2);
                     showToast('Ảnh đã tải lên thành công!', 'success');
+                    document.getElementById('ai-preview-status').textContent = `AI da tao ${session.mask_count || 0} layer mask; click vao vung muon son hoac chon mau de doi lai nhanh.`;
                 };
                 reader.readAsDataURL(file);
             }
@@ -1895,7 +2282,18 @@ function setupEventHandlers() {
     // Add drag-drop support for upload area
     const uploadArea = document.querySelector(".upload-area");
     if (uploadArea) {
+        uploadArea.addEventListener("click", (e) => {
+            if (state.aiColorTool.isProcessing) {
+                e.preventDefault();
+                e.stopPropagation();
+                showToast('AI đang xử lý, vui lòng chờ kết quả.', 'error');
+            }
+        }, true);
         uploadArea.addEventListener("dragover", (e) => {
+            if (state.aiColorTool.isProcessing) {
+                e.preventDefault();
+                return;
+            }
             e.preventDefault();
             uploadArea.style.borderColor = "var(--color-primary)";
             uploadArea.style.background = "rgba(67, 82, 165, 0.05)";
@@ -1905,6 +2303,10 @@ function setupEventHandlers() {
             uploadArea.style.background = "#fafbfc";
         });
         uploadArea.addEventListener("drop", (e) => {
+            if (state.aiColorTool.isProcessing) {
+                e.preventDefault();
+                return;
+            }
             e.preventDefault();
             uploadArea.style.borderColor = "#e5e7eb";
             uploadArea.style.background = "#fafbfc";
@@ -1915,6 +2317,14 @@ function setupEventHandlers() {
             }
         });
     }
+
+    ['ai-preview-image', 'ai-generated-image', 'ai-original-image'].forEach((id) => {
+        const imageEl = document.getElementById(id);
+        if (imageEl) {
+            imageEl.style.cursor = 'crosshair';
+            imageEl.addEventListener('click', aiRegisterPaintClick);
+        }
+    });
 
     // Color palette items click handler
     const colorPaletteItems = document.querySelectorAll(".color-palette-item");

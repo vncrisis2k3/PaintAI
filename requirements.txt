@@ -3,3 +3,9 @@ uvicorn==0.24.0
 python-dotenv==1.0.0
 pillow>=11.0.0
 pydantic>=2.12.0
+numpy<2
+
+# Optional for SAM segmentation. Install manually with a compatible torch build:
+# pip install torch torchvision
+# pip install git+https://github.com/facebookresearch/segment-anything.git
+segment-anything @ git+https://github.com/facebookresearch/segment-anything.git

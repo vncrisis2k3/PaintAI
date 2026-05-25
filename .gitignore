@@ -53,3 +53,12 @@ test_*.py
 .pytest_cache/
 .vercel
 .env*
+
+# Large local AI model checkpoints
+models/
+*.pth
+*.pt
+*.safetensors
+
+# Generated click-to-paint sessions
+paint_sessions/

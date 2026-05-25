@@ -5,6 +5,7 @@ import urllib.parse
 import io
 import json
 import base64
+import uuid
 from typing import Optional, Any, Dict, List
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,11 +62,91 @@ async def validation_exception_handler(request, exc):
     )
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+APP_ROOT = Path(__file__).parent
+PAINT_SESSIONS_DIR = Path(os.environ.get("PAINT_SESSIONS_DIR", str(APP_ROOT / "paint_sessions")))
+PAINT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+def normalize_ai_area_id(area_id: Any) -> str:
+    value = str(area_id or "").strip().lower().replace("_", "-")
+    if value in {"wall", "walls", "main-wall", "main-walls"}:
+        return "wall-main"
+    for allowed in ("wall-main", "trim", "column", "detail", "accent", "ceiling", "roof", "window-frame", "door"):
+        if value == allowed or value.startswith(f"{allowed}-"):
+            return allowed
+    return value
+
+
+def normalize_layer_type(value: Any, fallback_id: Any = None) -> str:
+    raw = str(value or fallback_id or "").strip().lower().replace("_", "-")
+    if raw in {"walls", "main-wall", "main-walls", "facade", "facade-wall"} or raw.startswith("wall"):
+        return "wall"
+    if raw.startswith("column") or raw in {"pillar", "pilaster"}:
+        return "column"
+    if raw.startswith("trim") or raw in {"molding", "cornice", "border", "detail", "decorative-detail"}:
+        return "trim"
+    if raw.startswith("window"):
+        return "window-frame"
+    if raw.startswith("door"):
+        return "door"
+    if raw.startswith("roof"):
+        return "roof"
+    if raw.startswith("ceiling"):
+        return "ceiling"
+    if raw.startswith("accent"):
+        return "accent"
+    return raw or "wall"
+
+
+LAYER_PRIORITY = {
+    "wall": 10,
+    "wall-main": 10,
+    "accent": 15,
+    "ceiling": 15,
+    "roof": 20,
+    "column": 30,
+    "trim": 40,
+    "detail": 40,
+    "window-frame": 50,
+    "door": 60,
+}
+
+
+def get_layer_priority(layer_type: Any, area_id: Any = None, explicit_priority: Any = None) -> int:
+    try:
+        if explicit_priority is not None:
+            return int(explicit_priority)
+    except (TypeError, ValueError):
+        pass
+    layer_type = normalize_layer_type(layer_type, area_id)
+    area_id = normalize_ai_area_id(area_id)
+    return LAYER_PRIORITY.get(layer_type, LAYER_PRIORITY.get(area_id, 10))
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _session_dir(image_id: str) -> Path:
+    clean_id = "".join(ch for ch in image_id if ch.isalnum() or ch in {"-", "_"})
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="image_id không hợp lệ")
+    path = PAINT_SESSIONS_DIR / clean_id
+    if not path.resolve().is_relative_to(PAINT_SESSIONS_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="image_id không hợp lệ")
+    return path
+
+
+def _load_session_meta(image_id: str) -> Dict[str, Any]:
+    meta_path = _session_dir(image_id) / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên ảnh")
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _save_session_meta(image_id: str, meta: Dict[str, Any]) -> None:
+    meta_path = _session_dir(image_id) / "metadata.json"
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 # ==========================================================================
 # IMAGE CORS BYPASS PROXY
@@ -142,9 +223,283 @@ def get_brands():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/ai/sam-status")
+def get_sam_status():
+    """Return whether optional Segment Anything integration is ready."""
+    try:
+        from sam_segmenter import _get_checkpoint_path, is_sam_available
+
+        checkpoint = _get_checkpoint_path()
+        missing = []
+        try:
+            import segment_anything  # noqa: F401
+        except Exception:
+            missing.append("segment_anything")
+        try:
+            import numpy as np
+            numpy_version = np.__version__
+            if int(str(numpy_version).split(".", 1)[0]) >= 2:
+                missing.append("numpy<2")
+        except Exception:
+            numpy_version = None
+            missing.append("numpy")
+        try:
+            import torch
+            torch_version = torch.__version__
+        except Exception:
+            torch_version = None
+            missing.append("torch")
+
+        return {
+            "success": True,
+            "sam_available": bool(is_sam_available()),
+            "model_type": os.environ.get("SAM_MODEL_TYPE", "vit_b"),
+            "device": os.environ.get("SAM_DEVICE", "auto"),
+            "checkpoint_configured": bool(checkpoint),
+            "checkpoint_path": checkpoint or None,
+            "missing_requirements": missing,
+            "numpy_version": numpy_version,
+            "torch_version": torch_version,
+        }
+    except Exception as e:
+        return {
+            "success": True,
+            "sam_available": False,
+            "error": str(e),
+        }
+
 # ==========================================================================
 # 2. API DANH SÁCH MẪU NHÀ (PHÂN TRANG)
 # ==========================================================================
+class UploadPaintImageRequest(BaseModel):
+    image: str = Field(..., description="Base64 image data")
+    detectedAreas: Optional[List[Dict[str, Any]]] = Field(default=[], description="Optional AI-detected layer hints")
+
+
+class ApplyPaintRequest(BaseModel):
+    image_id: str = Field(..., description="ID returned by /api/upload-image")
+    x: int = Field(..., ge=0, description="Click X coordinate in image pixels")
+    y: int = Field(..., ge=0, description="Click Y coordinate in image pixels")
+    color: str = Field(..., description="Target HEX color, e.g. #D8C3A5")
+    blend_space: str = Field("hsv", description="Currently supports hsv")
+
+    @field_validator("color")
+    @classmethod
+    def validate_color(cls, value):
+        color = (value or "").strip()
+        if color.startswith("#"):
+            color = color[1:]
+        if len(color) != 6:
+            raise ValueError("color must be a valid #RRGGBB HEX value")
+        try:
+            int(color, 16)
+        except ValueError as exc:
+            raise ValueError("color must be a valid #RRGGBB HEX value") from exc
+        return f"#{color.upper()}"
+
+
+@app.post("/api/upload-image")
+def upload_paint_image(payload: UploadPaintImageRequest):
+    """Store an uploaded image and precompute click-selectable paint masks."""
+    try:
+        from image_painter import _decode_image, build_layer_masks, generate_click_masks
+
+        image = _decode_image(payload.image)
+        if image is None:
+            raise HTTPException(status_code=400, detail="Không thể đọc ảnh upload")
+
+        image_id = uuid.uuid4().hex
+        session_path = _session_dir(image_id)
+        masks_path = session_path / "masks"
+        masks_path.mkdir(parents=True, exist_ok=True)
+
+        image.save(session_path / "original.png", format="PNG")
+        image.save(session_path / "current.png", format="PNG")
+
+        mask_meta = []
+        detected_areas = payload.detectedAreas or []
+        layer_meta = None
+
+        if detected_areas:
+            paint_areas = {
+                str(area.get("id")).strip(): "#FFFFFF"
+                for area in detected_areas
+                if isinstance(area, dict) and area.get("id")
+            }
+            layers, layer_meta = build_layer_masks(
+                image=image,
+                paint_areas=paint_areas,
+                detected_areas=detected_areas,
+            )
+            source = "ai_layer_mask"
+            for layer in layers:
+                mask_id = "".join(
+                    ch if ch.isalnum() or ch in {"-", "_"} else "-"
+                    for ch in str(layer.get("id") or f"mask_{len(mask_meta) + 1:03d}")
+                ).strip("-_") or f"mask_{len(mask_meta) + 1:03d}"
+                layer["mask"].save(masks_path / f"{mask_id}.png", format="PNG", optimize=True)
+                mask_meta.append({
+                    "id": mask_id,
+                    "type": layer.get("type"),
+                    "path": f"masks/{mask_id}.png",
+                    "priority": layer.get("priority", get_layer_priority(layer.get("type"), mask_id)),
+                    "area": layer.get("area", 0),
+                    "bbox": layer.get("bbox"),
+                    "source": source,
+                })
+
+        if not mask_meta:
+            masks, source = generate_click_masks(image)
+            for mask_id, mask, meta in masks:
+                mask.save(masks_path / f"{mask_id}.png", format="PNG", optimize=True)
+                mask_meta.append({
+                    "id": mask_id,
+                    "type": normalize_layer_type(meta.get("type"), mask_id),
+                    "path": f"masks/{mask_id}.png",
+                    "priority": get_layer_priority(meta.get("type"), mask_id, meta.get("priority")),
+                    "area": meta.get("area", 0),
+                    "bbox": meta.get("bbox"),
+                    "source": meta.get("source", source),
+                })
+
+        metadata = {
+            "image_id": image_id,
+            "width": image.size[0],
+            "height": image.size[1],
+            "current_version": 0,
+            "mask_source": source,
+            "layer_meta": layer_meta,
+            "masks": mask_meta,
+        }
+        _save_session_meta(image_id, metadata)
+
+        return {
+            "success": True,
+            "image_id": image_id,
+            "image_url": f"/api/paint-image/{image_id}",
+            "masks_ready": len(mask_meta) > 0,
+            "mask_source": source,
+            "mask_count": len(mask_meta),
+            "data": metadata,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi upload/tạo mask: {str(e)}")
+
+
+@app.post("/api/apply-paint")
+def apply_paint(payload: ApplyPaintRequest):
+    """Apply a selected HEX color to the precomputed mask under click X/Y."""
+    try:
+        from PIL import Image
+        from image_painter import create_click_mask, encode_pil_image, paint_with_hsv_mask, refine_mask_for_click
+
+        session_path = _session_dir(payload.image_id)
+        metadata = _load_session_meta(payload.image_id)
+        current_path = session_path / "current.png"
+        original_path = session_path / "original.png"
+        if not current_path.exists():
+            raise HTTPException(status_code=404, detail="Không tìm thấy ảnh hiện tại")
+
+        current = Image.open(current_path).convert("RGB")
+        mask_source_image = Image.open(original_path).convert("RGB") if original_path.exists() else current
+        width, height = current.size
+        if payload.x >= width or payload.y >= height:
+            raise HTTPException(status_code=400, detail="Tọa độ click nằm ngoài ảnh")
+
+        selected_mask = None
+        selected_meta = None
+        candidates = []
+        for mask_meta in metadata.get("masks", []):
+            mask_path = session_path / mask_meta.get("path", "")
+            if not mask_path.exists():
+                continue
+            mask = Image.open(mask_path).convert("L")
+            if mask.getpixel((payload.x, payload.y)) > 0:
+                candidates.append((mask_meta, mask))
+
+        if candidates:
+            selected_meta, raw_mask = sorted(
+                candidates,
+                key=lambda item: (
+                    int(item[0].get("priority", 10)),
+                    -int(item[0].get("area", 0)),
+                ),
+                reverse=True,
+            )[0]
+            selected_mask = refine_mask_for_click(mask_source_image, raw_mask, payload.x, payload.y)
+
+        if selected_mask is None:
+            if metadata.get("mask_source") == "ai_layer_mask":
+                return {
+                    "success": False,
+                    "error_type": "ai_mask_not_found",
+                    "message": "KhÃ´ng tÃ¬m tháº¥y AI layer mask táº¡i tá»a Ä‘á»™ click nÃ y. HÃ£y click gáº§n vÃ¹ng Ä‘Ã£ Ä‘Æ°á»£c AI phÃ¢n tÃ¡ch.",
+                }
+            selected_mask = create_click_mask(mask_source_image, payload.x, payload.y)
+            if selected_mask is None:
+                return {
+                    "success": False,
+                    "error_type": "mask_not_found",
+                    "message": "Không tìm thấy vùng mask phù hợp tại tọa độ click này.",
+                }
+            mask_id = f"mask_{len(metadata.get('masks', [])) + 1:03d}"
+            masks_path = session_path / "masks"
+            masks_path.mkdir(exist_ok=True)
+            selected_mask.save(masks_path / f"{mask_id}.png", format="PNG", optimize=True)
+            bbox = selected_mask.getbbox()
+            selected_meta = {
+                "id": mask_id,
+                "type": "wall",
+                "path": f"masks/{mask_id}.png",
+                "priority": get_layer_priority("wall", mask_id),
+                "area": sum(count for value, count in enumerate(selected_mask.histogram()) if value > 0),
+                "bbox": list(bbox) if bbox else None,
+                "source": "click_connected_color",
+            }
+            metadata.setdefault("masks", []).append(selected_meta)
+
+        result = paint_with_hsv_mask(current, selected_mask, payload.color)
+        metadata["current_version"] = int(metadata.get("current_version", 0)) + 1
+        result.save(current_path, format="PNG", optimize=True)
+        _save_session_meta(payload.image_id, metadata)
+
+        painted_pixels = sum(count for value, count in enumerate(selected_mask.histogram()) if value > 0)
+        result_image = encode_pil_image(result)
+        image_url = f"/api/paint-image/{payload.image_id}?v={metadata['current_version']}"
+        return {
+            "success": True,
+            "image": result_image,
+            "image_url": image_url,
+            "mask_id": selected_meta.get("id"),
+            "data": {
+                "image": result_image,
+                "image_url": image_url,
+                "paint_meta": {
+                    "mask_id": selected_meta.get("id"),
+                    "mask_type": selected_meta.get("type"),
+                    "priority": selected_meta.get("priority"),
+                    "blend_space": "hsv",
+                    "painted_pixels": painted_pixels,
+                    "mask_source": selected_meta.get("source"),
+                },
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi apply-paint: {str(e)}")
+
+
+@app.get("/api/paint-image/{image_id}")
+def get_paint_image(image_id: str):
+    current_path = _session_dir(image_id) / "current.png"
+    if not current_path.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh hiện tại")
+    return FileResponse(current_path, media_type="image/png")
+
+
 @app.get("/api/collections")
 def get_collections(
     project_type_id: int = Query(None, description="Lọc theo ID loại công trình"),
@@ -601,6 +956,8 @@ def get_favorite_colors():
 class AIColorizeRequest(BaseModel):
     image: str
     api_key: str = None
+    project_type: Optional[str] = None
+    requested_areas: Optional[List[Dict[str, Any]]] = None
 
 @app.post("/api/ai-colorize")
 def ai_colorize(payload: AIColorizeRequest):
@@ -633,46 +990,87 @@ def ai_colorize(payload: AIColorizeRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Mã hóa ảnh Base64 không hợp lệ.")
 
-    system_prompt = """
+    requested_areas = []
+    for area in payload.requested_areas or []:
+        if not isinstance(area, dict):
+            continue
+        area_id = str(area.get("id") or "").strip()
+        label = str(area.get("label") or area.get("name") or area_id).strip()
+        if area_id and label:
+            requested_areas.append({"id": area_id, "label": label})
+
+    if requested_areas:
+        requested_areas_text = "\n".join(
+            f'- "{area["id"]}": {area["label"]}' for area in requested_areas
+        )
+        schema_id_hint = '"<requested-area-id>"'
+        id_rule = (
+            "Detect ONLY the user-selected paint areas below. Use exactly these ids. Do not rename, merge, or replace them with generic ids:\n"
+            f"{requested_areas_text}\n"
+            "Return detected_areas only for selected ids. If the same selected area appears in multiple disconnected parts, return multiple entries with the same id."
+        )
+    else:
+        schema_id_hint = '"wall-main" | "trim" | "column" | "detail" | "accent" | "ceiling"'
+        id_rule = "Use only the allowed IDs for the detected space."
+
+    project_type_hint = (
+        f'The user selected project_type="{payload.project_type}". Respect it when it matches the image.'
+        if payload.project_type in {"interior", "exterior"}
+        else "Detect whether the image is exterior or interior and set space_type accordingly."
+    )
+
+    system_prompt = f"""
 You are a computer vision and architectural analysis engine integrated into a paint-coloring application.
 
 Your task is to analyze the provided building image and return only a single valid JSON object that matches this schema exactly:
-{
+{{
   "space_type": "exterior" | "interior",
   "detected_areas": [
-    {
-      "id": "wall-main" | "trim" | "column" | "detail" | "accent" | "ceiling",
+    {{
+      "id": {schema_id_hint},
+      "type": "wall" | "roof" | "column" | "trim" | "window_frame" | "door" | "ceiling" | "accent",
       "name_vi": "string",
-      "box_2d": [ymin, xmin, ymax, xmax]
-    }
+      "box_2d": [ymin, xmin, ymax, xmax],
+      "polygon_2d": [[y, x], [y, x], [y, x]],
+      "seed_points_2d": [[y, x], [y, x]],
+      "priority": 10
+    }}
   ],
   "suggested_palettes": [
-    {
+    {{
       "style_name": "string",
-      "colors": {
+      "colors": {{
         "<area-id>": "#RRGGBB"
-      }
-    }
+      }}
+    }}
   ]
-}
+}}
 
 Rules:
-- Detect whether the image is exterior or interior and set space_type accordingly.
-- Use only the allowed IDs for the detected space.
-- For each detected area, provide a normalized bounding box on a 0-1000 scale in [ymin, xmin, ymax, xmax] order.
+- {project_type_hint}
+- {id_rule}
+- This system is for paint companies. Accuracy of paintable-region boundaries is more important than finding every possible region.
+- For each detected area, provide the tightest possible normalized bounding box on a 0-1000 scale in [ymin, xmin, ymax, xmax] order.
+- Also provide polygon_2d points on the same 0-1000 scale when the paintable surface is not rectangular. Trace only the paintable surface, excluding doors, windows, glass, roof tiles, sky, furniture, trees, people, floors, ground, pavement, signs, lamps, and decorative objects that should not receive paint.
+- Provide 1 to 5 seed_points_2d inside each detected paintable surface. Put seed points near the center of the material that should change color, not on edges, windows, shadows, plants, furniture, or background.
+- Classify each area with type and priority. Use priority wall=10, roof=20, column=30, trim/detail=40, window_frame=50, door=60 unless a requested region clearly maps to a more specific category.
+- For trim/phào chỉ, molding, cornice, borders, columns, and small architectural details, use narrow boxes and polygons around only that element. Do not include adjacent wall-main surfaces.
+- If the selected area is not clearly visible, omit it instead of guessing.
+- Prefer fewer, accurate paintable areas over broad boxes that include non-paint surfaces.
+- Keep distinct requested regions separate even when they have similar material or color.
 - Include at most 2 suggested palettes.
 - Use valid HEX colors only.
 - If an area is not visible, omit it.
 - Return JSON only. Do not include markdown fences, comments, explanations, or extra text.
 """
 
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={api_key}"
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
 
     request_data = {
         "contents": [
             {
                 "parts": [
-                    {"text": "Analyze the building image and return the requested JSON schema with detected areas, normalized bounding boxes, and suggested palettes."},
+                    {"text": "Analyze the building image and return the requested JSON schema with only the selected paint areas, normalized bounding boxes, polygons, seed points, and suggested palettes."},
                     {
                         "inlineData": {
                             "mimeType": mime_type,
@@ -701,7 +1099,7 @@ Rules:
             method="POST"
         )
 
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=90) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
 
@@ -709,8 +1107,55 @@ Rules:
             if not candidates:
                 return {"success": False, "message": "Không nhận được câu trả lời từ Gemini API."}
 
-            text_content = candidates[0]["content"]["parts"][0]["text"]
+            text_content = candidates[0]["content"]["parts"][0]["text"].strip()
+            if text_content.startswith("```"):
+                text_content = text_content.strip("`").replace("json\n", "", 1).strip()
             ai_data = json.loads(text_content)
+            
+            # Be tolerant when Gemini returns a semantically correct but slightly
+            # different key shape. The frontend expects data.detected_areas.
+            if isinstance(ai_data, list):
+                ai_data = {"detected_areas": ai_data}
+            detected_areas = (
+                ai_data.get("detected_areas")
+                or ai_data.get("detectedAreas")
+                or ai_data.get("areas")
+                or ai_data.get("paintable_areas")
+                or ai_data.get("regions")
+                or []
+            )
+            normalized_areas = []
+            for area in detected_areas if isinstance(detected_areas, list) else []:
+                if not isinstance(area, dict):
+                    continue
+                box = (
+                    area.get("box_2d")
+                    or area.get("box2d")
+                    or area.get("bbox")
+                    or area.get("bounding_box")
+                    or area.get("boundingBox")
+                )
+                raw_area_id = area.get("id") or area.get("area_id") or area.get("type")
+                area_id = str(raw_area_id or "").strip()
+                if not any(requested["id"] == area_id for requested in requested_areas):
+                    area_id = normalize_ai_area_id(raw_area_id)
+                if area_id and box and len(box) == 4:
+                    normalized = dict(area)
+                    normalized["id"] = area_id
+                    layer_type = normalize_layer_type(area.get("type"), area_id)
+                    normalized["type"] = layer_type
+                    normalized["priority"] = get_layer_priority(layer_type, area_id, area.get("priority"))
+                    normalized["box_2d"] = box
+                    seed_points = (
+                        area.get("seed_points_2d")
+                        or area.get("seedPoints2d")
+                        or area.get("seed_points")
+                        or area.get("seedPoints")
+                    )
+                    if seed_points:
+                        normalized["seed_points_2d"] = seed_points
+                    normalized_areas.append(normalized)
+            ai_data["detected_areas"] = normalized_areas
 
             return {
                 "success": True,
@@ -821,7 +1266,7 @@ def test_gemini_key(api_key: Optional[str] = Query(None), payload: Optional[Test
         }
     
     try:
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={api_key}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         
         test_request = {
             "contents": [{
@@ -910,19 +1355,30 @@ def ai_generate_colors(payload: AIGenerateColorsRequest):
 
     try:
         # Import only the AI-based painter
-        from image_painter import apply_paint_color_ai
+        from image_painter import apply_paint_color_ai_with_meta
 
-        result_image = apply_paint_color_ai(
+        result_image, paint_meta = apply_paint_color_ai_with_meta(
             payload.image,
             payload.paintAreas,
             payload.detectedAreas,
             payload.projectType
         )
 
+        if not paint_meta.get("changed") or paint_meta.get("painted_pixels", 0) <= 0:
+            return {
+                "success": False,
+                "error_type": "empty_paint_mask",
+                "message": (
+                    "AI đã phân tích ảnh nhưng không tạo được mask sơn có hiệu lực. "
+                    "Hãy chọn đúng vùng có trong ảnh hoặc thử màu khác/vùng khác."
+                ),
+                "data": {"paint_meta": paint_meta},
+            }
+
         return {
             "success": True,
             "image": result_image,
-            "data": {"image": result_image},
+            "data": {"image": result_image, "paint_meta": paint_meta},
             "message": "✨ Ảnh phối màu được tạo thành công (sử dụng AI-detected areas)",
         }
 

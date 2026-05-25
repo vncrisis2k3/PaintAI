@@ -64,12 +64,12 @@
             </div>
             
             <nav class="sidebar-nav">
-                <button id="tab-ai" class="sidebar-nav-btn" data-tab="ai">
+                <button id="tab-ai" class="sidebar-nav-btn active" data-tab="ai">
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
                     <span>Phối màu AI</span>
                     <span class="badge-new">Hot</span>
                 </button>
-                <button id="tab-templates" class="sidebar-nav-btn active" data-tab="templates">
+                <button id="tab-templates" class="sidebar-nav-btn" data-tab="templates">
                     <i class="fa-solid fa-house-chimney"></i>
                     <span>Thư viện mẫu</span>
                 </button>
@@ -101,8 +101,8 @@
             <!-- STICKY TOP HEADER - PaintAI Header.tsx style -->
             <header class="main-header">
                 <div class="header-title-area">
-                    <h2 id="header-main-title">Thư viện mẫu công trình</h2>
-                    <p id="header-sub-title">Xem trước ý tưởng phối màu cho không gian của bạn</p>
+                    <h2 id="header-main-title">Trợ Lý Phối Màu AI</h2>
+                    <p id="header-sub-title">Tự động phân tách và phối màu trực quan bằng AI trong 30 giây</p>
                 </div>
                 
                 <div class="header-actions">
@@ -126,7 +126,7 @@
             </header>
 
             <!-- TAB CONTENT: PHỐI MÀU AI - FULL EDITOR -->
-            <div id="tab-content-ai" class="tab-content-wrapper">
+            <div id="tab-content-ai" class="tab-content-wrapper active">
                 <div class="ai-color-editor-container">
                     <!-- Left Panel: Configuration -->
                     <div class="ai-left-panel">
@@ -204,6 +204,10 @@
                                         <i class="fa-solid fa-wand-magic-sparkles"></i>
                                         Tạo ảnh phối màu
                                     </button>
+                                    <button class="btn-add-image" onclick="aiChooseAnotherImage()">
+                                        <i class="fa-solid fa-image"></i>
+                                        Thêm ảnh khác
+                                    </button>
                                     <button class="btn-refresh" onclick="aiGoToStep(2)">
                                         <i class="fa-solid fa-arrow-rotate-right"></i>
                                         Làm mới
@@ -268,7 +272,7 @@
 
             <!-- TAB CONTENT: THƯ VIỆN MẪU (CATALOG PAGE) -->
 
-            <div id="tab-content-templates" class="tab-content-wrapper active">
+            <div id="tab-content-templates" class="tab-content-wrapper">
                 
                 <!-- PROMOTIONAL AI BANNER -->
                 <div class="ai-promo-banner">
@@ -645,4 +649,3 @@
 
 </body>
 </html>
-

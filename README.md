@@ -1,6 +1,6 @@
 # PaintAI - Hệ Thống Phối Màu Kiến Trúc Thông Minh
 
-Ứng dụng web AI giúp tự động phân tách và phối màu sơn cho các công trình kiến trúc bằng công nghệ Google Gemini 1.5 Pro.
+Ứng dụng web AI giúp tự động phân tách và phối màu sơn cho các công trình kiến trúc bằng công nghệ Google Gemini 2.5 Flash.
 
 ## 🎯 Tính Năng Chính
 
@@ -40,6 +40,9 @@ Tạo file `.env` trong thư mục gốc với nội dung:
 
 ```
 GEMINI_API_KEY=your_api_key_here
+SAM_CHECKPOINT=models/sam_vit_b_01ec64.pth
+SAM_MODEL_TYPE=vit_b
+SAM_DEVICE=cpu
 ```
 
 Lấy API key từ: https://ai.google.dev/
@@ -135,7 +138,7 @@ GET /api/proxy-image?url=...     # Bypass CORS cho ảnh
 | **Frontend** | Vanilla JavaScript + HTML5 Canvas |
 | **Database** | SQLite3 |
 | **Styling** | CSS3 + Tailwind CSS |
-| **AI** | Google Gemini 1.5 Pro API |
+| **AI** | Google Gemini 2.5 Flash API |
 | **Server** | Uvicorn |
 
 ## 🔧 Cấu Hình

@@ -669,6 +669,7 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
     padding: 12px 16px;
     border-radius: 8px;
     cursor: pointer;
@@ -676,6 +677,10 @@ h1, h2, h3, h4, h5, h6 {
     border-left: 4px solid transparent;
     font-size: 13px;
     font-weight: 600;
+}
+
+.color-part-item > span {
+    flex: 1;
 }
 
 .color-part-item.active {
@@ -699,6 +704,26 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 6px;
     border: 2px solid #e5e7eb;
     cursor: pointer;
+    flex-shrink: 0;
+}
+
+.color-swatch.unpainted {
+    background:
+        linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
+        linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
+        linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
+    background-color: #ffffff;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-size: 16px 16px;
+}
+
+.part-paint-status {
+    min-width: 58px;
+    text-align: right;
+    font-size: 10px;
+    font-weight: 700;
+    color: #9ca3af;
 }
 
 .color-part-item.active .color-swatch {
@@ -836,6 +861,16 @@ h1, h2, h3, h4, h5, h6 {
     transform: translateY(-2px);
 }
 
+.btn-generate:disabled,
+.btn-refresh:disabled,
+.btn-add-image:disabled,
+.type-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
 .btn-refresh {
     background: #f3f4f6;
     color: var(--text-main);
@@ -855,6 +890,28 @@ h1, h2, h3, h4, h5, h6 {
 
 .btn-refresh:hover {
     background: #e5e7eb;
+}
+
+.btn-add-image {
+    background: #ffffff;
+    color: var(--color-primary);
+    border: 1px solid rgba(67, 82, 165, 0.25);
+    padding: 12px;
+    border-radius: 12px;
+    font-family: var(--font-family);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.25s ease;
+}
+
+.btn-add-image:hover {
+    background: rgba(67, 82, 165, 0.06);
+    border-color: var(--color-primary);
 }
 
 .btn-back {
@@ -893,6 +950,51 @@ h1, h2, h3, h4, h5, h6 {
     overflow: hidden;
     position: relative;
     min-height: 500px;
+}
+
+.ai-processing-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(17, 24, 39, 0.72);
+    backdrop-filter: blur(2px);
+    pointer-events: all;
+}
+
+.ai-preview-viewport.ai-processing .ai-processing-overlay {
+    display: flex;
+}
+
+.ai-preview-viewport.ai-processing .ai-preview-placeholder,
+.ai-preview-viewport.ai-processing .ai-preview-image,
+.ai-preview-viewport.ai-processing .ai-comparison-container {
+    filter: brightness(0.42);
+}
+
+.ai-processing-box {
+    min-width: 168px;
+    min-height: 78px;
+    padding: 18px 24px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.ai-processing-box i {
+    font-size: 22px;
 }
 
 .ai-preview-placeholder {
