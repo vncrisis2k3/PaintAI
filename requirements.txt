@@ -8,4 +8,6 @@ numpy<2
 # Optional for SAM segmentation. Install manually with a compatible torch build:
 # pip install torch torchvision
 # pip install git+https://github.com/facebookresearch/segment-anything.git
-segment-anything @ git+https://github.com/facebookresearch/segment-anything.git
+# Optional SAM integration (disabled for serverless deploys)
+# If you need SAM locally or on a suitable VM, install manually:
+# pip install git+https://github.com/facebookresearch/segment-anything.git

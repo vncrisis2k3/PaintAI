@@ -1,0 +1,7 @@
+# Ignore large model files and local venv
+models/
+.venv/
+paint_sessions/
+*.pth
+.vscode/
+__pycache__/
