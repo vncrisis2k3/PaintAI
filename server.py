@@ -88,8 +88,40 @@ def _choose_db_path() -> str:
 
 DB_PATH = _choose_db_path()
 APP_ROOT = Path(__file__).parent
-PAINT_SESSIONS_DIR = Path(os.environ.get("PAINT_SESSIONS_DIR", str(APP_ROOT / "paint_sessions")))
-PAINT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _choose_paint_sessions_dir() -> Path:
+    """Return a writable Path for paint_sessions.
+
+    Preference order:
+    1. `PAINT_SESSIONS_DIR` env var (absolute or repo-relative)
+    2. repo `paint_sessions/` if writable
+    3. system temp directory under `paint_sessions/`
+    4. plain system temp directory (last resort)
+    """
+    env_path = os.environ.get("PAINT_SESSIONS_DIR")
+    if env_path:
+        p = Path(env_path)
+        if not p.is_absolute():
+            p = APP_ROOT / p
+    else:
+        p = APP_ROOT / "paint_sessions"
+
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    except OSError:
+        # Repo path is not writable (serverless). Try system temp dir.
+        tmp = Path(tempfile.gettempdir()) / "paint_sessions"
+        try:
+            tmp.mkdir(parents=True, exist_ok=True)
+            return tmp
+        except Exception:
+            # As a last resort return the plain temp dir (no nested folder)
+            return Path(tempfile.gettempdir())
+
+
+PAINT_SESSIONS_DIR = _choose_paint_sessions_dir()
 
 def normalize_ai_area_id(area_id: Any) -> str:
     value = str(area_id or "").strip().lower().replace("_", "-")
