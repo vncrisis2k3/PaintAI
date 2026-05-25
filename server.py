@@ -61,7 +61,32 @@ async def validation_exception_handler(request, exc):
         }
     )
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+import tempfile
+
+
+def _choose_db_path() -> str:
+    """Pick a writable SQLite path: prefer env var, then repo file, then system temp, then in-memory."""
+    env_path = os.environ.get("DATABASE_PATH")
+    if env_path:
+        return env_path
+    repo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+    try:
+        # Try creating the file to verify write access
+        conn = sqlite3.connect(repo_path)
+        conn.close()
+        return repo_path
+    except Exception:
+        try:
+            tmp = os.path.join(tempfile.gettempdir(), "database.db")
+            conn = sqlite3.connect(tmp)
+            conn.close()
+            return tmp
+        except Exception:
+            # Last resort: use in-memory DB (not persistent across invocations)
+            return ":memory:"
+
+
+DB_PATH = _choose_db_path()
 APP_ROOT = Path(__file__).parent
 PAINT_SESSIONS_DIR = Path(os.environ.get("PAINT_SESSIONS_DIR", str(APP_ROOT / "paint_sessions")))
 PAINT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
