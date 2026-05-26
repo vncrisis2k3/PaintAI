@@ -33,8 +33,14 @@ def _get_checkpoint_path() -> Optional[str]:
 
 def _load_optional_sam():
     try:
-        import numpy as np
         import torch
+
+        version = torch.__version__.split("+", 1)[0]
+        major, minor, *_ = [int(part) for part in version.split(".") if part.isdigit()]
+        if (major, minor) < (2, 4):
+            return None
+
+        import numpy as np
         from PIL import Image, ImageChops, ImageFilter
         from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 

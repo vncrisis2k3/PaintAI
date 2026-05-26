@@ -546,11 +546,8 @@ async function aiAnalyzeInitialMasks(imageDataUrl) {
     return detectedAreas;
 }
 
-async function aiCreatePaintSession(imageDataUrl, detectedAreas = []) {
+async function aiCreatePaintSession(imageDataUrl) {
     const payload = { image: imageDataUrl };
-    if (Array.isArray(detectedAreas) && detectedAreas.length > 0) {
-        payload.detectedAreas = detectedAreas;
-    }
     const response = await fetch(`${API_BASE}/api/upload-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2259,11 +2256,10 @@ function setupEventHandlers() {
                     
                     document.getElementById('ai-preview-status').textContent = 'Ảnh đã tải lên thành công. Chọn loại công trình.';
                     setAiProcessing(true);
-                    showToast('Dang phan tich AI va tao layer mask...', 'success');
+                    showToast('Dang tao mask local de click son...', 'success');
                     let session;
                     try {
-                        const detectedAreas = await aiAnalyzeInitialMasks(compressedImage);
-                        session = await aiCreatePaintSession(compressedImage, detectedAreas);
+                        session = await aiCreatePaintSession(compressedImage);
                     } catch (error) {
                         setAiProcessing(false);
                         showToast('Loi: ' + error.message, 'error');
@@ -2272,7 +2268,7 @@ function setupEventHandlers() {
                     setAiProcessing(false);
                     aiGoToStep(2);
                     showToast('Ảnh đã tải lên thành công!', 'success');
-                    document.getElementById('ai-preview-status').textContent = `AI da tao ${session.mask_count || 0} layer mask; click vao vung muon son hoac chon mau de doi lai nhanh.`;
+                    document.getElementById('ai-preview-status').textContent = `Da tao ${session.mask_count || 0} local click mask; click vao vung muon son hoac chon mau de doi lai nhanh.`;
                 };
                 reader.readAsDataURL(file);
             }

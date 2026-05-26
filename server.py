@@ -2,10 +2,12 @@ import os
 import sqlite3
 import urllib.request
 import urllib.parse
+import urllib.error
 import io
 import json
 import base64
 import uuid
+import socket
 from typing import Optional, Any, Dict, List
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -205,6 +207,21 @@ def _save_session_meta(image_id: str, meta: Dict[str, Any]) -> None:
     meta_path = _session_dir(image_id) / "metadata.json"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
+
+def _gemini_request_timeout() -> int:
+    """Return a bounded timeout for Gemini calls.
+
+    The default is kept below common client/proxy read timeouts so slow model
+    responses fail fast with a clear error instead of surfacing as an opaque
+    upstream timeout.
+    """
+    raw_timeout = os.environ.get("GEMINI_REQUEST_TIMEOUT_SECONDS", "45")
+    try:
+        timeout = int(raw_timeout)
+    except (TypeError, ValueError):
+        timeout = 45
+    return max(5, min(timeout, 120))
+
 # ==========================================================================
 # IMAGE CORS BYPASS PROXY
 # ==========================================================================
@@ -330,7 +347,6 @@ def get_sam_status():
 # ==========================================================================
 class UploadPaintImageRequest(BaseModel):
     image: str = Field(..., description="Base64 image data")
-    detectedAreas: Optional[List[Dict[str, Any]]] = Field(default=[], description="Optional AI-detected layer hints")
 
 
 class ApplyPaintRequest(BaseModel):
@@ -359,7 +375,7 @@ class ApplyPaintRequest(BaseModel):
 def upload_paint_image(payload: UploadPaintImageRequest):
     """Store an uploaded image and precompute click-selectable paint masks."""
     try:
-        from image_painter import _decode_image, build_layer_masks, generate_click_masks
+        from image_painter import _decode_image, generate_click_masks
 
         image = _decode_image(payload.image)
         if image is None:
@@ -374,50 +390,20 @@ def upload_paint_image(payload: UploadPaintImageRequest):
         image.save(session_path / "current.png", format="PNG")
 
         mask_meta = []
-        detected_areas = payload.detectedAreas or []
         layer_meta = None
+        masks, source = generate_click_masks(image)
+        for mask_id, mask, meta in masks:
+            mask.save(masks_path / f"{mask_id}.png", format="PNG", optimize=True)
+            mask_meta.append({
+                "id": mask_id,
+                "type": normalize_layer_type(meta.get("type"), mask_id),
+                "path": f"masks/{mask_id}.png",
+                "priority": get_layer_priority(meta.get("type"), mask_id, meta.get("priority")),
+                "area": meta.get("area", 0),
+                "bbox": meta.get("bbox"),
+                "source": meta.get("source", source),
+            })
 
-        if detected_areas:
-            paint_areas = {
-                str(area.get("id")).strip(): "#FFFFFF"
-                for area in detected_areas
-                if isinstance(area, dict) and area.get("id")
-            }
-            layers, layer_meta = build_layer_masks(
-                image=image,
-                paint_areas=paint_areas,
-                detected_areas=detected_areas,
-            )
-            source = "ai_layer_mask"
-            for layer in layers:
-                mask_id = "".join(
-                    ch if ch.isalnum() or ch in {"-", "_"} else "-"
-                    for ch in str(layer.get("id") or f"mask_{len(mask_meta) + 1:03d}")
-                ).strip("-_") or f"mask_{len(mask_meta) + 1:03d}"
-                layer["mask"].save(masks_path / f"{mask_id}.png", format="PNG", optimize=True)
-                mask_meta.append({
-                    "id": mask_id,
-                    "type": layer.get("type"),
-                    "path": f"masks/{mask_id}.png",
-                    "priority": layer.get("priority", get_layer_priority(layer.get("type"), mask_id)),
-                    "area": layer.get("area", 0),
-                    "bbox": layer.get("bbox"),
-                    "source": source,
-                })
-
-        if not mask_meta:
-            masks, source = generate_click_masks(image)
-            for mask_id, mask, meta in masks:
-                mask.save(masks_path / f"{mask_id}.png", format="PNG", optimize=True)
-                mask_meta.append({
-                    "id": mask_id,
-                    "type": normalize_layer_type(meta.get("type"), mask_id),
-                    "path": f"masks/{mask_id}.png",
-                    "priority": get_layer_priority(meta.get("type"), mask_id, meta.get("priority")),
-                    "area": meta.get("area", 0),
-                    "bbox": meta.get("bbox"),
-                    "source": meta.get("source", source),
-                })
 
         metadata = {
             "image_id": image_id,
@@ -1156,7 +1142,7 @@ Rules:
             method="POST"
         )
 
-        with urllib.request.urlopen(req, timeout=90) as response:
+        with urllib.request.urlopen(req, timeout=_gemini_request_timeout()) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
 
@@ -1219,6 +1205,26 @@ Rules:
                 "data": ai_data
             }
     
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+        error_detail = str(e)
+        if isinstance(e, urllib.error.URLError) and getattr(e, "reason", None):
+            error_detail = str(e.reason)
+
+        if "timed out" in error_detail.lower():
+            return {
+                "success": False,
+                "error_type": "timeout",
+                "message": "❌ Gemini phản hồi quá chậm. Vui lòng thử lại hoặc giảm kích thước ảnh trước khi phân tích.",
+                "detail": error_detail
+            }
+
+        return {
+            "success": False,
+            "error_type": "network_error",
+            "message": "❌ Không thể kết nối tới Gemini API.",
+            "detail": error_detail
+        }
+
     except urllib.error.HTTPError as e:
         """Handle specific HTTP errors from Gemini API"""
         error_body = e.read().decode("utf-8") if e.fp else ""

@@ -231,6 +231,29 @@ console.log(state.aiColorTool.uploadedImage?.length);
 - Nhập tên cho phương án của bạn
 - Xem lại trong tab "Thiết kế của tôi"
 
+## 🧭 Sơ Đồ Workflow Hệ Thống
+
+```mermaid
+flowchart TD
+  A[Người dùng mở giao diện web] --> B[Upload ảnh công trình]
+  B --> C[Frontend gửi ảnh lên Gemini để phân tích]
+  C --> D{Gemini trả về thành công?}
+  D -- Không --> E[Hiển thị lỗi\nrate_limit / quota_exceeded / invalid_api_key]
+  E --> F[Dừng luồng xử lý]
+  D -- Có --> G[Lấy màu gợi ý và detected_areas]
+  G --> H[Frontend gửi request tô màu sang backend]
+  H --> I[Backend xử lý ảnh theo vùng kiến trúc]
+  I --> J[Trả ảnh phối màu base64]
+  J --> K[Hiển thị ảnh trước / sau]
+  K --> L[Người dùng lưu thiết kế hoặc xuất báo cáo]
+
+  style A fill:#eef7ff,stroke:#2563eb,stroke-width:1px
+  style D fill:#fff7ed,stroke:#f97316,stroke-width:1px
+  style E fill:#fef2f2,stroke:#dc2626,stroke-width:1px
+  style I fill:#ecfdf5,stroke:#16a34a,stroke-width:1px
+  style K fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px
+```
+
 ## 📊 Dữ Liệu
 
 ### Danh Mục Loại Công Trình

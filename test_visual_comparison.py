@@ -7,10 +7,20 @@ import base64
 import io
 import requests
 import json
+import sys
 from PIL import Image
 import numpy as np
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+__test__ = False
+
 API_BASE = "http://127.0.0.1:8000"
+
+def response_error_message(result):
+    return result.get("message") or result.get("detail") or result.get("error") or "Unknown error"
 
 def create_test_image_with_details():
     """Create a more detailed test image with distinct areas"""
@@ -132,6 +142,29 @@ def main():
             "wall-main": "#33FF57",    # Green - cho tường chính
             "trim": "#3357FF"          # Blue - cho phào chỉ
         },
+        "detectedAreas": [
+            {
+                "id": "ceiling",
+                "type": "ceiling",
+                "box_2d": [0, 0, 250, 1000],
+                "polygon_2d": [[0, 0], [0, 1000], [250, 1000], [250, 0]],
+                "seed_points_2d": [[125, 500]],
+            },
+            {
+                "id": "wall-main",
+                "type": "wall",
+                "box_2d": [250, 0, 750, 1000],
+                "polygon_2d": [[250, 0], [250, 1000], [750, 1000], [750, 0]],
+                "seed_points_2d": [[500, 500]],
+            },
+            {
+                "id": "trim",
+                "type": "trim",
+                "box_2d": [750, 0, 1000, 1000],
+                "polygon_2d": [[750, 0], [750, 1000], [1000, 1000], [1000, 0]],
+                "seed_points_2d": [[875, 500]],
+            },
+        ],
         "api_key": None
     }
     
@@ -151,9 +184,11 @@ def main():
             compare_images(test_image_b64, painted_image_b64)
             
         else:
-            print(f"❌ API lỗi: {result.get('message')}")
+            print(f"❌ API lỗi: {response_error_message(result)}")
+            sys.exit(1)
     except Exception as e:
         print(f"❌ Lỗi: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
