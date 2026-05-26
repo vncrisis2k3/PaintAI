@@ -1,5 +1,13 @@
 {
   "version": 2,
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "DISABLE_LOCAL_AI": "1"
+  },
   "routes": [
     {
       "src": "/api/(.*)",

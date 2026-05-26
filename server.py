@@ -8,7 +8,9 @@ import json
 import base64
 import uuid
 import socket
+import logging
 from typing import Optional, Any, Dict, List
+import requests
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +23,22 @@ env_file = Path(__file__).parent / ".env"
 if env_file.exists():
     from dotenv import load_dotenv
     load_dotenv(env_file)
+
+# Initialize logging
+logger = logging.getLogger(__name__)
+
+# YOLO Detector (Optional - try to import, fallback to Gemini if not available)
+try:
+    if os.environ.get("DISABLE_LOCAL_AI", "").strip().lower() in {"1", "true", "yes"}:
+        raise ImportError("local AI disabled by DISABLE_LOCAL_AI")
+    from yolo_detector import get_detector
+    YOLO_AVAILABLE = True
+    YOLO_DETECTOR = get_detector(use_gpu=True)
+    logger.info("✅ YOLO detector initialized successfully")
+except Exception as e:
+    YOLO_AVAILABLE = False
+    YOLO_DETECTOR = None
+    logger.warning(f"⚠️  YOLO not available ({e}). Will use Gemini API as fallback.")
 
 # Initialize FastAPI
 app = FastAPI(
@@ -478,7 +496,7 @@ def apply_paint(payload: ApplyPaintRequest):
                 return {
                     "success": False,
                     "error_type": "ai_mask_not_found",
-                    "message": "KhÃ´ng tÃ¬m tháº¥y AI layer mask táº¡i tá»a Ä‘á»™ click nÃ y. HÃ£y click gáº§n vÃ¹ng Ä‘Ã£ Ä‘Æ°á»£c AI phÃ¢n tÃ¡ch.",
+                    "message": "Không tìm thấy AI layer mask tại tọa độ click này. Hãy click gần v�ng đã được AI phân tách.",
                 }
             selected_mask = create_click_mask(mask_source_image, payload.x, payload.y)
             if selected_mask is None:
@@ -1005,15 +1023,76 @@ class AIColorizeRequest(BaseModel):
 @app.post("/api/ai-colorize")
 def ai_colorize(payload: AIColorizeRequest):
     """
-    Call Google Gemini 2.5 Flash API to analyze building structure and recommend paint colors.
-    Implements proper error handling for rate limits and quota exceeded.
+    Detect architectural areas and suggest paint colors.
     
     Flow:
-    1. Check Gemini API quota status
-    2. If limit reached → return error immediately (NO image processing)
-    3. If OK → call Gemini for analysis
-    4. Return results (PIL/OpenCV processing happens in separate endpoint)
+    1. Try YOLO first (fast, offline, free) if available
+    2. If YOLO confidence low or not available → Fall back to Gemini API
+    3. Return results with source indicator ('yolo' or 'gemini')
+    
+    This hybrid approach provides:
+    - Speed: YOLO runs in 100-300ms on GPU
+    - Reliability: Gemini as fallback for complex cases
+    - Cost: Minimal API calls to Gemini
     """
+    
+    # ============================================================
+    # ATTEMPT 1: YOLO Detection (Fast, Free, Offline)
+    # ============================================================
+    if YOLO_AVAILABLE:
+        try:
+            logger.info("🚀 Attempting YOLO detection...")
+            detected_areas_yolo, success = YOLO_DETECTOR.detect_from_base64(
+                payload.image,
+                conf=0.5
+            )
+            
+            if success and len(detected_areas_yolo) > 0:
+                logger.info(f"✅ YOLO detected {len(detected_areas_yolo)} areas")
+                
+                # Filter by requested areas if specified
+                if payload.requested_areas:
+                    requested_ids = {str(area.get("id", "")).strip().lower() 
+                                   for area in payload.requested_areas}
+                    detected_areas_yolo = [
+                        area for area in detected_areas_yolo
+                        if normalize_ai_area_id(area.get("type", "")) in requested_ids
+                    ]
+                
+                # Format results for frontend
+                normalized_areas = []
+                for area in detected_areas_yolo:
+                    area_id = normalize_ai_area_id(area.get("type", ""))
+                    layer_type = normalize_layer_type(area.get("type"), area_id)
+                    
+                    normalized = {
+                        "id": area_id,
+                        "type": layer_type,
+                        "priority": get_layer_priority(layer_type, area_id),
+                        "box_2d": area.get("box_2d", []),
+                        "polygon_2d": area.get("polygon_2d"),
+                        "confidence": area.get("confidence", 0.0)
+                    }
+                    normalized_areas.append(normalized)
+                
+                return {
+                    "success": True,
+                    "source": "yolo",  # Indicate source
+                    "data": {
+                        "detected_areas": normalized_areas,
+                        "suggested_palettes": []  # Can be added later
+                    }
+                }
+            else:
+                logger.info("⚠️  YOLO confidence low or no areas detected, falling back to Gemini...")
+        
+        except Exception as e:
+            logger.error(f"❌ YOLO detection failed: {e}. Falling back to Gemini...")
+    
+    # ============================================================
+    # ATTEMPT 2: Gemini API (Fallback)
+    # ============================================================
+    logger.info("📡 Using Gemini API for detection...")
     api_key = payload.api_key or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {
@@ -1202,6 +1281,7 @@ Rules:
 
             return {
                 "success": True,
+                "source": "gemini",  # Indicate source for tracking
                 "data": ai_data
             }
     
@@ -1293,6 +1373,8 @@ class AIGenerateColorsRequest(BaseModel):
     paintAreas: dict = Field(..., description="Color mapping: { 'area-id': 'hex-color' } (required)")
     detectedAreas: Optional[List[Dict[str, Any]]] = Field(default=[], description="Optional AI-detected bounding boxes")
     api_key: Optional[str] = Field(None, description="Optional Gemini API key")
+    openai_api_key: Optional[str] = Field(None, description="Optional OpenAI API key")
+    imageProvider: Optional[str] = Field(None, description="'local', 'openai', or 'gemini'/'nano-banana'")
     
     @field_validator('image')
     @classmethod
@@ -1405,7 +1487,56 @@ def ai_generate_colors(payload: AIGenerateColorsRequest):
     - Custom ControlNet for precise area targeting
     """
     
-    # Strict behavior: require AI-detected areas. Do NOT fallback to geometric masking.
+    from ai_image_provider import (
+        edit_image_with_ai_provider,
+        is_external_ai_image_provider,
+        normalize_ai_image_provider,
+    )
+
+    image_provider = normalize_ai_image_provider(payload.imageProvider)
+
+    if is_external_ai_image_provider(image_provider):
+        try:
+            provider_key = payload.openai_api_key if image_provider in {"openai", "gpt-image"} else payload.api_key
+            result_image, provider_meta = edit_image_with_ai_provider(
+                provider=image_provider,
+                image=payload.image,
+                project_type=payload.projectType,
+                paint_areas=payload.paintAreas,
+                detected_areas=payload.detectedAreas,
+                api_key=provider_key,
+            )
+            paint_meta = {
+                "provider": provider_meta.get("provider", image_provider),
+                "model": provider_meta.get("model"),
+                "painted_pixels": None,
+                "changed": True,
+                "mode": "external_ai_image_edit",
+            }
+            return {
+                "success": True,
+                "image": result_image,
+                "data": {"image": result_image, "paint_meta": paint_meta},
+                "message": "Ảnh phối màu được tạo bằng AI image provider",
+            }
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else 502
+            detail = e.response.text if e.response is not None else str(e)
+            return {
+                "success": False,
+                "error_type": "ai_image_provider_error",
+                "status_code": status_code,
+                "message": f"Lỗi từ AI image provider ({image_provider})",
+                "detail": detail[:1000],
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error_type": "ai_image_provider_error",
+                "message": f"Không thể xử lý ảnh bằng AI image provider ({image_provider}): {str(e)}",
+            }
+
+    # Strict behavior for local painter: require AI-detected areas. Do NOT fallback to geometric masking.
     # If detectedAreas is missing or empty, raise a 400 so frontend shows a clear message to user.
     if not payload.detectedAreas or len(payload.detectedAreas) == 0:
         raise HTTPException(

@@ -1,7 +1,17 @@
 # Ignore large model files and local venv
 models/
 .venv/
+.env
+.env.*
 paint_sessions/
 *.pth
+*.pt
+*.safetensors
 .vscode/
 __pycache__/
+.pytest_cache/
+.git/
+fix_*.py
+YOLO_SETUP.md
+SAM_SETUP.md
+requirements-local-ai.txt

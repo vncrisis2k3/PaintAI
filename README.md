@@ -111,18 +111,39 @@ POST /api/ai/generate-colors     # Tạo ảnh phối màu
     "accent": "#FF5733",
     "ceiling": "#2E8B57"
   },
-  "detected_areas": [
+  "detectedAreas": [
     {
       "id": "wall-main",
       "name_vi": "Tường chính",
       "box_2d": [250, 100, 900, 900]
     }
   ],
-  "api_key": null
+  "api_key": null,
+  "imageProvider": "local|openai|gemini"
 }
 ```
 
-`detected_areas` là dữ liệu tùy chọn từ bước phân tích AI. Nếu có bounding box, backend sẽ tô màu theo tọa độ; nếu không có, hệ thống sẽ fallback sang chế độ tô hình học cũ.
+`detectedAreas` la du lieu tuy chon tu buoc phan tich AI. Voi provider `local`, backend can du lieu nay de tao mask son chinh xac. Voi provider `openai` hoac `gemini`, backend se dua du lieu nay vao prompt de huong dan model.
+
+### AI Image Provider
+
+Flow AI hien tai gui anh, loai cong trinh, va mau da chon sang Gemini 2.5 Flash Image de tao anh phoi mau. Co the cau hinh provider bang bien moi truong:
+
+```env
+AI_IMAGE_PROVIDER=openai
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_IMAGE_MODEL=gpt-image-1
+```
+
+Hoac:
+
+```env
+AI_IMAGE_PROVIDER=gemini
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+```
+
+Frontend gui `imageProvider: "gemini"` khi bam nut tao anh AI. Gia tri provider ho tro: `local`, `openai`, `gpt-image`, `gemini`, `nano-banana`.
 
 ### Proxy
 

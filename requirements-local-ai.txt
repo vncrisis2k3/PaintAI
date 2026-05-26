@@ -1,0 +1,14 @@
+# Optional local AI dependencies. Do not install these on Vercel serverless.
+# Install locally only when you want YOLO/SAM-style offline detection.
+
+-r requirements.txt
+
+# YOLO Detection (YOLOv8)
+# For a GPU-specific torch build, follow https://pytorch.org/get-started/locally/
+ultralytics>=8.1.0
+torch>=2.0.0
+torchvision>=0.15.0
+opencv-python>=4.8.0
+
+# Optional SAM integration. Install manually if needed:
+# pip install git+https://github.com/facebookresearch/segment-anything.git

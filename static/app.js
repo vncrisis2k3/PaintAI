@@ -494,15 +494,7 @@ async function aiSelectColor(hexColor) {
         statusItem.style.color = 'var(--color-primary)';
     }
 
-    if (state.aiColorTool.imageId && state.aiColorTool.lastClick) {
-        await aiApplyPaintAtClick();
-        return;
-    }
 
-    if (state.aiColorTool.imageId) {
-        showToast('Da chon mau. Click vao vung tren anh de son ngay.', 'success');
-        return;
-    }
     
     showToast('Đã chọn màu cho phần này', 'success');
 }
@@ -598,7 +590,7 @@ function aiRegisterPaintClick(event) {
 
 async function aiApplyPaintAtClick() {
     if (state.aiColorTool.isProcessing) {
-        showToast('AI Ä‘ang xá»­ lÃ½, vui lÃ²ng chá» káº¿t quáº£.', 'error');
+        showToast('AI đang xử lý, vui lòng chờ kết quả.', 'error');
         return;
     }
     if (!state.aiColorTool.imageId) {
@@ -722,10 +714,6 @@ async function aiLoadColors() {
 }
 
 async function aiGenerateColors() {
-    if (state.aiColorTool.imageId) {
-        return aiApplyPaintAtClick();
-    }
-
     if (state.aiColorTool.isProcessing) {
         showToast('AI đang xử lý, vui lòng chờ kết quả.', 'error');
         return;
@@ -769,28 +757,12 @@ async function aiGenerateColors() {
     
     try {
         const requestedAreas = aiBuildRequestedAreas(colors);
-        const requestedAreasKey = aiGetRequestedAreasKey(requestedAreas);
-        let detectedAreas = (
-            state.aiColorTool.detectedAreasRequestKey === requestedAreasKey && Array.isArray(window.globalDetectedAreas)
-        ) ? window.globalDetectedAreas : [];
         const savedApiKey = localStorage.getItem("gemini_api_key");
+        if (false) {
+            const analyzeResult = { success: true, data: { detected_areas: requestedAreas } };
+            const requestedAreasKey = aiGetRequestedAreasKey(requestedAreas);
+            let detectedAreas = requestedAreas;
         
-        // Analyze the uploaded image before painting. The backend refuses empty
-        // detectedAreas because an empty mask would force a broad geometric fill.
-        if (!detectedAreas.length) {
-            const analyzePayload = {
-                image: image,
-                project_type: type,
-                requested_areas: requestedAreas
-            };
-            if (savedApiKey) analyzePayload.api_key = savedApiKey;
-            
-            const analyzeResponse = await fetch(`${API_BASE}/api/ai-colorize`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(analyzePayload)
-            });
-            const analyzeResult = await analyzeResponse.json();
             console.log('🤖 AI colorize response:', analyzeResult);
             console.log('🤖 AI colorize response JSON:', JSON.stringify(analyzeResult));
             
@@ -818,12 +790,15 @@ async function aiGenerateColors() {
         
         showToast('⏳ Đang tạo ảnh phối màu với mask AI...', 'success');
         
+        showToast('Dang tao anh AI bang Gemini 2.5 Flash Image...', 'success');
+
         // Build request payload
         const payload = {
             image: image,
             projectType: type,
             paintAreas: colors,
-            detectedAreas: detectedAreas
+            detectedAreas: requestedAreas,
+            imageProvider: 'gemini'
         };
         if (savedApiKey) payload.api_key = savedApiKey;
         
@@ -834,7 +809,7 @@ async function aiGenerateColors() {
             paintAreasCount: Object.keys(payload.paintAreas).length,
             paintAreasData: payload.paintAreas,
             requestedAreas: requestedAreas,
-            detectedAreasCount: Array.isArray(payload.detectedAreas) ? payload.detectedAreas.length : 0
+            imageProvider: payload.imageProvider
         });
         
         const response = await fetch(`${API_BASE}/api/ai/generate-colors`, {
@@ -2255,20 +2230,9 @@ function setupEventHandlers() {
                     if (previewControls) previewControls.style.display = 'flex';
                     
                     document.getElementById('ai-preview-status').textContent = 'Ảnh đã tải lên thành công. Chọn loại công trình.';
-                    setAiProcessing(true);
-                    showToast('Dang tao mask local de click son...', 'success');
-                    let session;
-                    try {
-                        session = await aiCreatePaintSession(compressedImage);
-                    } catch (error) {
-                        setAiProcessing(false);
-                        showToast('Loi: ' + error.message, 'error');
-                        return;
-                    }
-                    setAiProcessing(false);
                     aiGoToStep(2);
                     showToast('Ảnh đã tải lên thành công!', 'success');
-                    document.getElementById('ai-preview-status').textContent = `Da tao ${session.mask_count || 0} local click mask; click vao vung muon son hoac chon mau de doi lai nhanh.`;
+                    document.getElementById('ai-preview-status').textContent = 'Anh da tai len. Chon noi that/ngoai that, chon mau tung chi tiet roi bam tao anh AI.';
                 };
                 reader.readAsDataURL(file);
             }
@@ -2317,8 +2281,7 @@ function setupEventHandlers() {
     ['ai-preview-image', 'ai-generated-image', 'ai-original-image'].forEach((id) => {
         const imageEl = document.getElementById(id);
         if (imageEl) {
-            imageEl.style.cursor = 'crosshair';
-            imageEl.addEventListener('click', aiRegisterPaintClick);
+            imageEl.style.cursor = 'default';
         }
     });
 
