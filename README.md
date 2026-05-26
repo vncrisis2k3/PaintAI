@@ -292,7 +292,7 @@ Dùng `requirements.txt` hiện tại. Không đưa `torch`, `ultralytics`, `ope
 
 ### Tạo ảnh bị timeout
 
-Gemini image editing có thể chậm. `vercel.json` hiện đặt `maxDuration` là 60 giây, nhưng giới hạn thực tế phụ thuộc plan Vercel của bạn.
+Gemini image editing có thể chậm. Giới hạn thời gian chạy function phụ thuộc plan Vercel của bạn. Nếu gặp timeout, cần nâng plan, tối ưu kích thước ảnh upload, hoặc chạy backend ở môi trường server/API riêng thay vì serverless.
 
 ### Ảnh ngoài không hiển thị do CORS
 
