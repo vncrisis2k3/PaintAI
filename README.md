@@ -1,51 +1,51 @@
 # PaintAI
 
-PaintAI la ung dung web giup phoi mau son kien truc bang AI. He thong hien tai su dung FastAPI o backend, giao dien JavaScript thuan o frontend, va Gemini image editing (`gemini-2.5-flash-image`) de tao anh phoi mau tu anh goc va mau son nguoi dung chon.
+PaintAI là ứng dụng web giúp phối màu sơn kiến trúc bằng AI. Hệ thống hiện tại sử dụng FastAPI ở backend, giao diện JavaScript thuần ở frontend, và Gemini image editing (`gemini-2.5-flash-image`) để tạo ảnh phối màu từ ảnh gốc và màu sơn người dùng chọn.
 
-## Tong Quan Workflow Phoi Mau AI
+## Tổng Quan Workflow Phối Màu AI
 
 ```text
-Nguoi dung upload anh
-  -> chon Noi that hoac Ngoai that
-  -> chon mau HEX cho tung chi tiet kien truc
-  -> frontend gui payload ve backend
-  -> backend doi ma HEX thanh ten mau tieng Anh theo ngu canh kien truc
-  -> backend ghep prompt tieng Anh chuan hoa
-  -> backend gui anh goc + prompt sang Gemini image API
-  -> Gemini tra ve anh base64
-  -> frontend hien thi thanh truot so sanh Truoc/Sau
+Người dùng upload ảnh
+  -> chọn Nội thất hoặc Ngoại thất
+  -> chọn màu HEX cho từng chi tiết kiến trúc
+  -> frontend gửi payload về backend
+  -> backend đổi mã HEX thành tên màu tiếng Anh theo ngữ cảnh kiến trúc
+  -> backend ghép prompt tiếng Anh chuẩn hóa
+  -> backend gửi ảnh gốc + prompt sang Gemini image API
+  -> Gemini trả về ảnh base64
+  -> frontend hiển thị thanh trượt so sánh Trước/Sau
 ```
 
-Vi du phan mau trong prompt backend tao ra:
+Ví dụ phần màu trong prompt backend tạo ra:
 
 ```text
 - wall-main (main exterior facade wall): soft warm beige, exact paint HEX #C8B08A
 - trim (trim): charcoal black, exact paint HEX #222222
 ```
 
-## Tinh Nang Chinh
+## Tính Năng Chính
 
-- Upload anh cong trinh dinh dang JPG, PNG, WEBP.
-- Chon luong noi that hoac ngoai that.
-- Gan mau son cho tung chi tiet kien truc.
-- Tao anh phoi mau bang Gemini image editing.
-- So sanh anh goc va anh AI bang thanh truot Before/After.
-- Xem thu vien mau son, mau cong trinh, thiet ke da luu.
-- Ho tro tuy chon stack AI local YOLO/SAM khi chay ngoai moi truong serverless.
+- Upload ảnh công trình định dạng JPG, PNG, WEBP.
+- Chọn luồng nội thất hoặc ngoại thất.
+- Gán màu sơn cho từng chi tiết kiến trúc.
+- Tạo ảnh phối màu bằng Gemini image editing.
+- So sánh ảnh gốc và ảnh AI bằng thanh trượt Before/After.
+- Xem thư viện màu sơn, mẫu công trình, thiết kế đã lưu.
+- Hỗ trợ tùy chọn stack AI local YOLO/SAM khi chạy ngoài môi trường serverless.
 
-## Cai Dat Va Chay Local
+## Cài Đặt Và Chạy Local
 
-### 1. Cai dependency
+### 1. Cài dependency
 
 ```bash
 pip install -r requirements.txt
 ```
 
-`requirements.txt` hien chi gom cac goi nhe phu hop cho Vercel/serverless. Neu can YOLO/SAM local, xem muc **AI Local Tuy Chon** ben duoi.
+`requirements.txt` hiện chỉ gồm các gói nhẹ phù hợp cho Vercel/serverless. Nếu cần YOLO/SAM local, xem mục **AI Local Tùy Chọn** bên dưới.
 
-### 2. Tao file `.env`
+### 2. Tạo file `.env`
 
-Tao file `.env` o thu muc goc:
+Tạo file `.env` ở thư mục gốc:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
@@ -54,55 +54,55 @@ GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 DISABLE_LOCAL_AI=1
 ```
 
-### 3. Chay server
+### 3. Chạy server
 
 ```bash
 python server.py
 ```
 
-Hoac:
+Hoặc:
 
 ```bash
 python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
-Mo trinh duyet:
+Mở trình duyệt:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-## Lay Gemini API Key
+## Lấy Gemini API Key
 
-1. Vao Google AI Studio:
+1. Vào Google AI Studio:
 
 ```text
 https://aistudio.google.com/app/apikey
 ```
 
-2. Dang nhap tai khoan Google.
-3. Bam **Create API key**.
-4. Chon hoac tao Google Cloud Project.
-5. Copy key va dua vao `.env`:
+2. Đăng nhập tài khoản Google.
+3. Bấm **Create API key**.
+4. Chọn hoặc tạo Google Cloud Project.
+5. Copy key và đưa vào `.env`:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
 ```
 
-Tren giao dien ung dung cung co nut **API Key**. Neu nhap key tren giao dien, key se duoc luu trong `localStorage` cua trinh duyet va gui kem moi request AI.
+Trên giao diện ứng dụng cũng có nút **API Key**. Nếu nhập key trên giao diện, key sẽ được lưu trong `localStorage` của trình duyệt và gửi kèm mỗi request AI.
 
-Thu tu uu tien API key:
+Thứ tự ưu tiên API key:
 
 ```text
-API key nhap tren giao dien
-  -> GEMINI_API_KEY trong bien moi truong
+API key nhập trên giao diện
+  -> GEMINI_API_KEY trong biến môi trường
 ```
 
-Neu doi key trong giao dien thi khong can restart server. Neu doi key trong `.env` thi phai restart server.
+Nếu đổi key trong giao diện thì không cần restart server. Nếu đổi key trong `.env` thì phải restart server.
 
-## Luu Y Ve Quota Gemini
+## Lưu Ý Về Quota Gemini
 
-Model `gemini-2.5-flash-image` co the khong co quota mien phi du de xu ly anh that. Neu gap loi:
+Model `gemini-2.5-flash-image` có thể không có quota miễn phí đủ để xử lý ảnh thật. Nếu gặp lỗi:
 
 ```text
 429 RESOURCE_EXHAUSTED
@@ -110,16 +110,16 @@ Quota exceeded
 free_tier_requests, limit: 0
 ```
 
-thi project/key hien tai khong co quota image generation kha dung. Can bat billing hoac dung key/project khac co quota:
+thì project/key hiện tại không có quota image generation khả dụng. Cần bật billing hoặc dùng key/project khác có quota:
 
 ```text
 https://ai.dev/rate-limit
 https://ai.google.dev/gemini-api/docs/rate-limits
 ```
 
-## API Chinh
+## API Chính
 
-Danh muc:
+Danh mục:
 
 ```http
 GET /api/project-types
@@ -135,13 +135,13 @@ GET  /api/ai/test-key
 POST /api/ai/generate-colors
 ```
 
-Proxy anh:
+Proxy ảnh:
 
 ```http
 GET /api/proxy-image?url=...
 ```
 
-## Payload Tao Anh Phoi Mau
+## Payload Tạo Ảnh Phối Màu
 
 ```json
 {
@@ -155,7 +155,7 @@ GET /api/proxy-image?url=...
     {
       "id": "wall-main",
       "label": "main exterior wall / facade wall paintable surface",
-      "displayLabel": "Tuong chinh",
+      "displayLabel": "Tường chính",
       "hex": "#C8B08A"
     }
   ],
@@ -164,7 +164,7 @@ GET /api/proxy-image?url=...
 }
 ```
 
-Provider ho tro:
+Provider hỗ trợ:
 
 ```text
 local
@@ -174,11 +174,11 @@ gemini
 nano-banana
 ```
 
-Frontend hien dang gui `imageProvider: "gemini"` khi nguoi dung bam tao anh AI.
+Frontend hiện đang gửi `imageProvider: "gemini"` khi người dùng bấm tạo ảnh AI.
 
-## Bien Moi Truong
+## Biến Môi Trường
 
-Bat buoc cho Gemini image generation:
+Bắt buộc cho Gemini image generation:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
@@ -186,14 +186,14 @@ AI_IMAGE_PROVIDER=gemini
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 ```
 
-Khuyen nghi khi deploy Vercel:
+Khuyến nghị khi deploy Vercel:
 
 ```env
 DISABLE_LOCAL_AI=1
 AI_IMAGE_REQUEST_TIMEOUT_SECONDS=90
 ```
 
-Tuy chon OpenAI image provider:
+Tùy chọn OpenAI image provider:
 
 ```env
 OPENAI_API_KEY=your-openai-api-key
@@ -202,23 +202,23 @@ OPENAI_IMAGE_SIZE=1024x1024
 OPENAI_IMAGE_QUALITY=medium
 ```
 
-Tuy chon luu tru local:
+Tùy chọn lưu trữ local:
 
 ```env
 PAINT_SESSIONS_DIR=./paint_sessions
 DATABASE_PATH=./database.db
 ```
 
-## Deploy Len Vercel
+## Deploy Lên Vercel
 
-Repo da cau hinh san cho Vercel:
+Repo đã cấu hình sẵn cho Vercel:
 
-- `api/index.py` la entrypoint serverless FastAPI.
-- `vercel.json` route `/api/*` ve serverless function va route static asset ve `/static`.
-- `DISABLE_LOCAL_AI=1` de Vercel khong import YOLO/Torch/OpenCV.
-- `requirements.txt` chi gom dependency nhe.
+- `api/index.py` là entrypoint serverless FastAPI.
+- `vercel.json` route `/api/*` về serverless function và route static asset về `/static`.
+- `DISABLE_LOCAL_AI=1` để Vercel không import YOLO/Torch/OpenCV.
+- `requirements.txt` chỉ gồm dependency nhẹ.
 
-Can set cac bien moi truong sau trong Vercel Dashboard:
+Cần set các biến môi trường sau trong Vercel Dashboard:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
@@ -228,90 +228,90 @@ DISABLE_LOCAL_AI=1
 AI_IMAGE_REQUEST_TIMEOUT_SECONDS=90
 ```
 
-Khong upload `.env`; file nay da duoc ignore boi `.vercelignore`.
+Không upload `.env`; file này đã được ignore bởi `.vercelignore`.
 
-Deploy bang CLI:
+Deploy bằng CLI:
 
 ```bash
 vercel
 ```
 
-Hoac deploy qua Git integration cua Vercel.
+Hoặc deploy qua Git integration của Vercel.
 
-## AI Local Tuy Chon
+## AI Local Tùy Chọn
 
-Mac dinh deploy khong cai cac goi nang nhu `torch`, `ultralytics`, `opencv-python`. Neu muon thu YOLO/SAM local, cai:
+Mặc định deploy không cài các gói nặng như `torch`, `ultralytics`, `opencv-python`. Nếu muốn thử YOLO/SAM local, cài:
 
 ```bash
 pip install -r requirements-local-ai.txt
 ```
 
-Khong dua cac goi nay vao `requirements.txt` khi deploy Vercel, vi rat de lam build fail hoac vuot gioi han serverless.
+Không đưa các gói này vào `requirements.txt` khi deploy Vercel, vì rất dễ làm build fail hoặc vượt giới hạn serverless.
 
-## Cau Truc Du An
+## Cấu Trúc Dự Án
 
 ```text
 .
 ├── api/
 │   └── index.py                 # Entrypoint Vercel serverless
 ├── static/
-│   ├── index.html               # Giao dien chinh
+│   ├── index.html               # Giao diện chính
 │   ├── app.js                   # Logic frontend
 │   ├── style.css                # CSS
 │   └── danh_sach_mau_son_chuan.json
-├── ai_image_provider.py         # Lop goi Gemini/OpenAI image provider
-├── image_painter.py             # Xu ly anh local
-├── sam_segmenter.py             # SAM tuy chon
-├── yolo_detector.py             # YOLO tuy chon
+├── ai_image_provider.py         # Lớp gọi Gemini/OpenAI image provider
+├── image_painter.py             # Xử lý ảnh local
+├── sam_segmenter.py             # SAM tùy chọn
+├── yolo_detector.py             # YOLO tùy chọn
 ├── server.py                    # FastAPI app
-├── requirements.txt             # Dependency nhe cho deploy
-├── requirements-local-ai.txt    # Dependency AI local tuy chon
-├── vercel.json                  # Cau hinh Vercel
+├── requirements.txt             # Dependency nhẹ cho deploy
+├── requirements-local-ai.txt    # Dependency AI local tùy chọn
+├── vercel.json                  # Cấu hình Vercel
 └── database.db                  # SQLite catalog local
 ```
 
-## Xu Ly Loi Thuong Gap
+## Xử Lý Lỗi Thường Gặp
 
-### Gemini key OK nhung tao anh loi 429
+### Gemini key OK nhưng tạo ảnh lỗi 429
 
-Key dung, nhung project khong co quota cho image model. Can bat billing hoac dung key/project khac co quota image generation.
+Key đúng, nhưng project không có quota cho image model. Cần bật billing hoặc dùng key/project khác có quota image generation.
 
-### Loi unexpected model name format
+### Lỗi unexpected model name format
 
-Kiem tra:
+Kiểm tra:
 
 ```env
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 ```
 
-Khong dien API key hoac URL vao `GEMINI_IMAGE_MODEL`.
+Không điền API key hoặc URL vào `GEMINI_IMAGE_MODEL`.
 
 ### Vercel build fail do Torch/OpenCV
 
-Dung `requirements.txt` hien tai. Khong dua `torch`, `ultralytics`, `opencv-python` vao `requirements.txt`; cac goi nay chi nam trong `requirements-local-ai.txt`.
+Dùng `requirements.txt` hiện tại. Không đưa `torch`, `ultralytics`, `opencv-python` vào `requirements.txt`; các gói này chỉ nằm trong `requirements-local-ai.txt`.
 
-### Tao anh bi timeout
+### Tạo ảnh bị timeout
 
-Gemini image editing co the cham. `vercel.json` hien dat `maxDuration` la 60 giay, nhung gioi han thuc te phu thuoc plan Vercel cua ban.
+Gemini image editing có thể chậm. `vercel.json` hiện đặt `maxDuration` là 60 giây, nhưng giới hạn thực tế phụ thuộc plan Vercel của bạn.
 
-### Anh ngoai khong hien thi do CORS
+### Ảnh ngoài không hiển thị do CORS
 
-Dung endpoint proxy:
+Dùng endpoint proxy:
 
 ```text
 /api/proxy-image?url=https://example.com/image.jpg
 ```
 
-## Kiem Tra Truoc Khi Deploy
+## Kiểm Tra Trước Khi Deploy
 
-Chay:
+Chạy:
 
 ```bash
 python -m pytest test_smoke.py ai_image_provider_test.py
 node --check static/app.js
 ```
 
-Ket qua mong doi:
+Kết quả mong đợi:
 
 ```text
 tests pass
