@@ -26,6 +26,206 @@ LAYER_PRIORITY = {
 }
 
 
+# ============================================================================
+# STANDARDIZED MASK PIPELINE - Prevents spillover & improves mask precision
+# ============================================================================
+
+class MaskPipeline:
+    """
+    Standardized 5-stage mask generation pipeline.
+    Prevents paint spillover, shadow bleed, and inaccurate layer boundaries.
+    """
+    
+    def __init__(self, image, box, polygon, area_id, project_type="interior", sam_session=None):
+        self.image = image
+        self.box = box
+        self.polygon = polygon
+        self.area_id = area_id
+        self.project_type = project_type  # "interior" or "exterior"
+        self.sam_session = sam_session
+        self.width, self.height = image.size
+        self.stages = {}  # Track each stage
+        self.logger_info = []
+        
+    def _apply_boundary_constraint(self, mask):
+        """
+        Constrain mask to safe regions (prevent spillover to sky/ground).
+        
+        Exterior: Keep TOP 25% free (sky), BOTTOM 10% free (ground)
+        Interior: Keep BOTTOM 25% free (floor)
+        """
+        pil = _load_pil()
+        if pil is None:
+            return mask
+        Image, ImageChops, _, _, _, _ = pil
+        
+        constraint = Image.new("L", (self.width, self.height), 255)
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(constraint)
+        
+        if self.project_type == "exterior":
+            # ❌ Protect sky (top 25%)
+            sky_limit = int(self.height * 0.25)
+            draw.rectangle([0, 0, self.width, sky_limit], fill=0)
+            # ❌ Protect ground (bottom 10%)
+            ground_start = int(self.height * 0.90)
+            draw.rectangle([0, ground_start, self.width, self.height], fill=0)
+        elif self.project_type == "interior":
+            # ❌ Protect floor (bottom 25%)
+            floor_start = int(self.height * 0.75)
+            draw.rectangle([0, floor_start, self.width, self.height], fill=0)
+        
+        constrained = ImageChops.multiply(mask, constraint)
+        self.logger_info.append(f"Boundary constraint applied for {self.project_type}")
+        return constrained
+    
+    def stage_1_shape(self):
+        """Stage 1: Create initial shape mask from box/polygon."""
+        shape_mask = _make_shape_mask(self.image.size, self.box, self.polygon)
+        self.stages["shape"] = {
+            "mask": shape_mask,
+            "area": _mask_area(shape_mask),
+            "source": "geometric"
+        }
+        self.logger_info.append(f"Stage 1 shape: area={self.stages['shape']['area']}")
+        return self
+    
+    def stage_2_surface_detection(self, seed_points=None):
+        """Stage 2: Detect surface using SAM or color-connected (with fallback)."""
+        shape_mask = self.stages.get("shape", {}).get("mask")
+        if shape_mask is None:
+            return self
+        
+        source = "unknown"
+        surface_mask = None
+        
+        # Try SAM first
+        if self.sam_session is not None:
+            try:
+                surface_mask = self.sam_session.predict_mask(self.box, shape_mask, seed_points)
+                source = "sam"
+            except Exception:
+                surface_mask = None
+        
+        # Fallback to connected color
+        if surface_mask is None:
+            surface_mask = _connected_surface_mask(
+                self.image, shape_mask, self.box, self.area_id, seed_points
+            )
+            source = "connected_color"
+        
+        self.stages["surface"] = {
+            "mask": surface_mask,
+            "area": _mask_area(surface_mask),
+            "source": source
+        }
+        self.logger_info.append(f"Stage 2 surface: area={self.stages['surface']['area']}, source={source}")
+        return self
+    
+    def stage_3_boundary_constraint(self):
+        """Stage 3: Apply regional constraints (sky, floor, etc.)."""
+        surface_mask = self.stages.get("surface", {}).get("mask")
+        if surface_mask is None:
+            return self
+        
+        constrained = self._apply_boundary_constraint(surface_mask)
+        self.stages["constrained"] = {
+            "mask": constrained,
+            "area": _mask_area(constrained),
+            "source": "boundary-constrained"
+        }
+        self.logger_info.append(f"Stage 3 constrained: area={self.stages['constrained']['area']}")
+        return self
+    
+    def stage_4_merge_and_clean(self):
+        """Stage 4: Merge with shape, clean noise, apply STRONG edge detection."""
+        pil = _load_pil()
+        Image, ImageChops, _, ImageEnhance, ImageFilter, ImageStat = pil
+        
+        shape_mask = self.stages.get("shape", {}).get("mask")
+        constrained_mask = self.stages.get("constrained", {}).get("mask") or self.stages.get("surface", {}).get("mask")
+        
+        if constrained_mask is None or shape_mask is None:
+            return self
+        
+        # Merge with shape
+        merged = ImageChops.multiply(constrained_mask, shape_mask)
+        
+        # STRONG edge detection to prevent spillover
+        gray = ImageEnhance.Contrast(self.image.convert("L")).enhance(1.5)  # ← Stronger
+        edges = gray.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(0.3))  # ← Tighter
+        edge_threshold = max(18, min(60, int(edges.getextrema()[1] * 0.6)))  # ← Aggressive
+        edge_barrier = edges.point(lambda p: 0 if p > edge_threshold else 255)
+        
+        # Apply edge barrier
+        merged = ImageChops.multiply(merged, edge_barrier)
+        
+        # Conservative median filter to preserve boundaries
+        cleaned = merged.filter(ImageFilter.MedianFilter(3))  # ← Smaller kernel
+        
+        self.stages["merged"] = {
+            "mask": cleaned,
+            "area": _mask_area(cleaned),
+            "source": "merged+edge-detected"
+        }
+        self.logger_info.append(f"Stage 4 merged: area={self.stages['merged']['area']}")
+        return self
+    
+    def stage_5_soft_blur(self):
+        """Stage 5: Apply CONSERVATIVE soft blur (not too much)."""
+        pil = _load_pil()
+        Image, _, _, _, ImageFilter, _ = pil
+        
+        cleaned_mask = self.stages.get("merged", {}).get("mask")
+        if cleaned_mask is None:
+            return self
+        
+        # Conservative blur: only 0.3px instead of 0.8
+        soft_blurred = cleaned_mask.filter(ImageFilter.GaussianBlur(0.3))  # ← Reduced blur
+        
+        self.stages["final"] = {
+            "mask": soft_blurred,
+            "area": _mask_area(soft_blurred),
+            "source": "soft-blurred"
+        }
+        self.logger_info.append(f"Stage 5 final: area={self.stages['final']['area']}")
+        return self
+    
+    def build(self):
+        """Execute full standardized pipeline."""
+        return (
+            self.stage_1_shape()
+            .stage_2_surface_detection()
+            .stage_3_boundary_constraint()
+            .stage_4_merge_and_clean()
+            .stage_5_soft_blur()
+        )
+    
+    def get_result(self):
+        """Return final mask and detailed metadata."""
+        if "final" not in self.stages:
+            return None, {"error": "Pipeline not executed"}
+        
+        final_mask = self.stages["final"]["mask"]
+        
+        if not final_mask or not final_mask.getbbox():
+            return None, {"error": "Final mask is empty"}
+        
+        return final_mask, {
+            "stages": {
+                name: {
+                    "area": info["area"],
+                    "source": info["source"],
+                    "bbox": _mask_bbox_list(info["mask"])
+                }
+                for name, info in self.stages.items()
+            },
+            "pipeline_source": self.stages["surface"].get("source", "unknown"),
+            "project_type": self.project_type,
+            "debug_log": self.logger_info
+        }
+
+
 def _load_pil():
     try:
         from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageStat
@@ -738,16 +938,24 @@ def _session_sam_or_connected_mask(
 
 def _paint_with_mask(base_image, target_rgb: Tuple[int, int, int], mask):
     pil = _load_pil()
-    Image, ImageChops, _, ImageEnhance, ImageFilter, _ = pil
+    Image, _, _, ImageEnhance, ImageFilter, _ = pil
     mask = mask.point(lambda p: 255 if p > 35 else 0).filter(ImageFilter.GaussianBlur(0.4))
-    gray = ImageEnhance.Contrast(base_image.convert("L")).enhance(1.08).convert("RGB")
-    color_layer = Image.new("RGB", base_image.size, target_rgb)
-    multiplied = ImageChops.multiply(color_layer, gray)
-
-    # Mix multiply result back with the original image to preserve highlights
-    # and avoid flat color bands.
-    painted = Image.blend(base_image, multiplied, 0.86)
-    return Image.composite(painted, base_image, mask)
+    
+    # Convert to HSV to preserve shadows and brightness information
+    target_hsv = Image.new("RGB", (1, 1), target_rgb).convert("HSV").getpixel((0, 0))
+    base_hsv = base_image.convert("HSV")
+    h, s, v = base_hsv.split()
+    
+    # Apply new hue & saturation while preserving original Value (brightness/shadows)
+    # This ensures shadows, highlights, and depth remain unchanged
+    target_h = Image.new("L", base_image.size, target_hsv[0])
+    target_s = Image.new("L", base_image.size, max(18, target_hsv[1]))
+    recolored = Image.merge("HSV", (target_h, target_s, v)).convert("RGB")
+    
+    # Blend for natural appearance without flat color bands
+    painted = Image.blend(base_image, recolored, 0.86)
+    result = Image.composite(painted, base_image, mask)
+    return ImageEnhance.Contrast(result).enhance(1.02)
 
 
 def _mask_coverage(mask) -> int:
@@ -782,9 +990,13 @@ def build_layer_masks(
     image,
     paint_areas: Dict[str, str],
     detected_areas: List[Dict[str, Any]],
+    project_type: str = "interior",
     sam_session=None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Turn Gemini hints into cleaned, priority-aware masks ready for painting."""
+    """
+    Turn Gemini hints into cleaned, priority-aware masks using standardized pipeline.
+    Uses MaskPipeline to prevent spillover to sky/ground and ensure accurate layer boundaries.
+    """
     pil = _load_pil()
     if pil is None:
         return [], {"used_sam": False, "detected_area_ids": []}
@@ -794,6 +1006,7 @@ def build_layer_masks(
     layers = []
     used_sam = False
     skipped_area_ids = []
+    layers_debug = []
 
     for area_id, hex_color in paint_areas.items():
         search_key, matching_areas = _matching_detected_areas(area_id, areas_map)
@@ -823,20 +1036,22 @@ def build_layer_masks(
                 width,
                 height,
             )
-            shape_mask = _make_shape_mask(image.size, box, polygon)
-            area_mask, area_used_sam = _session_sam_or_connected_mask(
-                sam_session,
-                image,
-                shape_mask,
-                box,
-                search_key,
-                seed_points,
+            
+            # ✅ Use standardized MaskPipeline
+            pipeline = MaskPipeline(
+                image, box, polygon, search_key,
+                project_type=project_type,
+                sam_session=sam_session
             )
-            used_sam = used_sam or area_used_sam
-            area_mask = ImageChops.multiply(area_mask, shape_mask)
-            area_mask = _edge_aware_mask(image, _clean_mask(area_mask), shape_mask)
-            if not area_mask.getbbox():
+            area_mask, pipeline_meta = pipeline.build().get_result()
+            
+            if area_mask is None or not area_mask.getbbox():
+                skipped_area_ids.append(search_key)
                 continue
+            
+            # Track SAM usage
+            used_sam = used_sam or (pipeline_meta.get("pipeline_source") == "sam")
+            
             instance_id = search_key if len(matching_areas) == 1 else f"{search_key}-{idx:02d}"
             layers.append({
                 "id": instance_id,
@@ -848,6 +1063,11 @@ def build_layer_masks(
                 "area": _mask_area(area_mask),
                 "bbox": _mask_bbox_list(area_mask),
             })
+            
+            layers_debug.append({
+                "id": instance_id,
+                "pipeline_metadata": pipeline_meta
+            })
 
         if not any(layer.get("group_id", layer["id"]) == search_key for layer in layers):
             skipped_area_ids.append(search_key)
@@ -855,8 +1075,10 @@ def build_layer_masks(
     resolved_layers = resolve_mask_overlap(layers)
     meta = {
         "used_sam": used_sam,
+        "project_type": project_type,
         "skipped_area_ids": skipped_area_ids,
         "detected_area_ids": sorted(areas_map.keys()),
+        "layers_debug": layers_debug,  # ← For troubleshooting
     }
     return resolved_layers, meta
 
@@ -914,7 +1136,11 @@ def apply_paint_color_ai(
         except Exception:
             sam_session = None
 
-        layers, _ = build_layer_masks(result_image, paint_areas, detected_areas, sam_session)
+        layers, _ = build_layer_masks(
+            result_image, paint_areas, detected_areas,
+            project_type=project_type,  # ← Pass project_type
+            sam_session=sam_session
+        )
         for layer in layers:
             result_image = _paint_with_mask(result_image, hex_to_rgb(layer["color"]), layer["mask"])
 
@@ -951,7 +1177,11 @@ def apply_paint_color_ai_with_meta(
     except Exception:
         sam_session = None
 
-    layers, layer_meta = build_layer_masks(result_image, paint_areas, detected_areas, sam_session)
+    layers, layer_meta = build_layer_masks(
+        result_image, paint_areas, detected_areas,
+        project_type=project_type,  # ← Pass project_type to pipeline
+        sam_session=sam_session
+    )
     layer_debug = []
     for layer in layers:
         coverage = _mask_coverage(layer["mask"])
