@@ -455,6 +455,49 @@ function aiGoToStep(step) {
     }
 }
 
+function aiResetAll() {
+    // Reset AI Color Tool state
+    state.aiColorTool = {
+        currentStep: 1,
+        projectType: null,
+        uploadedImage: null,
+        selectedPart: "wall-main",
+        selectedColor: null,
+        selectedColors: {},
+        detectedAreasRequestKey: null,
+        imageId: null,
+        lastClick: null,
+        areaClicks: {},
+        isProcessing: false
+    };
+    
+    // Clear file input
+    const fileInput = document.getElementById("ai-file-input");
+    if (fileInput) {
+        fileInput.value = "";
+    }
+    
+    // Clear global detected areas
+    window.globalDetectedAreas = [];
+    
+    // Hide preview elements
+    const previewImage = document.getElementById('ai-preview-image');
+    const comparisonContainer = document.getElementById('ai-comparison-container');
+    const previewControls = document.getElementById('ai-preview-controls');
+    const previewPlaceholder = document.getElementById('ai-preview-placeholder');
+    
+    if (previewImage) previewImage.style.display = 'none';
+    if (comparisonContainer) comparisonContainer.style.display = 'none';
+    if (previewControls) previewControls.style.display = 'none';
+    if (previewPlaceholder) previewPlaceholder.style.display = 'block';
+    
+    // Reset step UI
+    aiGoToStep(1);
+    
+    // Show success message
+    showToast('Đã làm mới trang', 'success');
+}
+
 function aiSelectPart(element, partId) {
     state.aiColorTool.selectedPart = partId;
     state.aiColorTool.selectedColor = state.aiColorTool.selectedColors[partId] || null;
