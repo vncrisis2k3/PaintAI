@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Download Feature</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 600px;
+            margin: 0 auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        .test-item {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f9f9f9;
+            border-left: 3px solid #4352a5;
+        }
+        .test-item.pass { border-left-color: #28a745; }
+        .test-item.fail { border-left-color: #dc3545; }
+        .test-item.pending { border-left-color: #ffc107; }
+        button {
+            background: #4352a5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover { background: #333f8a; }
+        .status { font-weight: bold; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 Test Download Feature</h1>
+        
+        <div id="test1" class="test-item pending">
+            <h3>Test 1: Check aiDownloadImage function</h3>
+            <button onclick="testDownloadFunction()">Run Test</button>
+            <div class="status" id="status1">Pending...</div>
+        </div>
+        
+        <div id="test2" class="test-item pending">
+            <h3>Test 2: Check aiZoomIn function</h3>
+            <button onclick="testZoomInFunction()">Run Test</button>
+            <div class="status" id="status2">Pending...</div>
+        </div>
+        
+        <div id="test3" class="test-item pending">
+            <h3>Test 3: Check aiZoomOut function</h3>
+            <button onclick="testZoomOutFunction()">Run Test</button>
+            <div class="status" id="status3">Pending...</div>
+        </div>
+        
+        <div id="test4" class="test-item pending">
+            <h3>Test 4: HTML onclick handlers</h3>
+            <button onclick="testHTMLHandlers()">Run Test</button>
+            <div class="status" id="status4">Pending...</div>
+        </div>
+    </div>
+
+    <!-- Include app.js to load functions -->
+    <script src="static/app.js"></script>
+    
+    <script>
+        // Auto-run tests on load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                testDownloadFunction();
+                testZoomInFunction();
+                testZoomOutFunction();
+                testHTMLHandlers();
+            }, 500);
+        });
+
+        function testDownloadFunction() {
+            try {
+                // Check if function exists
+                if (typeof aiDownloadImage !== 'function') {
+                    throw new Error('aiDownloadImage function not found');
+                }
+                
+                // Check if it's callable
+                const test = aiDownloadImage.toString();
+                if (test.includes('getElementById') && test.includes('toBlob')) {
+                    updateTest(1, 'pass', '✅ aiDownloadImage function exists and has correct logic');
+                } else {
+                    updateTest(1, 'fail', '❌ aiDownloadImage function exists but logic may be incomplete');
+                }
+            } catch (e) {
+                updateTest(1, 'fail', `❌ Error: ${e.message}`);
+            }
+        }
+
+        function testZoomInFunction() {
+            try {
+                if (typeof aiZoomIn !== 'function') {
+                    throw new Error('aiZoomIn function not found');
+                }
+                updateTest(2, 'pass', '✅ aiZoomIn function exists');
+            } catch (e) {
+                updateTest(2, 'fail', `❌ Error: ${e.message}`);
+            }
+        }
+
+        function testZoomOutFunction() {
+            try {
+                if (typeof aiZoomOut !== 'function') {
+                    throw new Error('aiZoomOut function not found');
+                }
+                updateTest(3, 'pass', '✅ aiZoomOut function exists');
+            } catch (e) {
+                updateTest(3, 'fail', `❌ Error: ${e.message}`);
+            }
+        }
+
+        function testHTMLHandlers() {
+            try {
+                // Check for onclick handlers in page
+                const pageHTML = document.documentElement.innerHTML;
+                const hasZoomIn = pageHTML.includes('onclick="aiZoomIn()"');
+                const hasZoomOut = pageHTML.includes('onclick="aiZoomOut()"');
+                const hasDownload = pageHTML.includes('onclick="aiDownloadImage()"');
+                
+                if (hasZoomIn && hasZoomOut && hasDownload) {
+                    updateTest(4, 'pass', '✅ All onclick handlers are present in HTML');
+                } else {
+                    const missing = [];
+                    if (!hasZoomIn) missing.push('aiZoomIn');
+                    if (!hasZoomOut) missing.push('aiZoomOut');
+                    if (!hasDownload) missing.push('aiDownloadImage');
+                    updateTest(4, 'fail', `❌ Missing handlers: ${missing.join(', ')}`);
+                }
+            } catch (e) {
+                updateTest(4, 'fail', `❌ Error: ${e.message}`);
+            }
+        }
+
+        function updateTest(testNum, status, message) {
+            const element = document.getElementById(`test${testNum}`);
+            const statusElement = document.getElementById(`status${testNum}`);
+            element.className = `test-item ${status}`;
+            statusElement.textContent = message;
+        }
+    </script>
+</body>
+</html>
