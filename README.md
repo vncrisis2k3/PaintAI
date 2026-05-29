@@ -1,60 +1,76 @@
 # PaintAI
 
-PaintAI là ứng dụng web giúp phối màu sơn kiến trúc bằng AI. Hệ thống hiện tại sử dụng FastAPI ở backend, giao diện JavaScript thuần ở frontend, và Gemini image editing (`gemini-2.5-flash-image`) để tạo ảnh phối màu từ ảnh gốc và màu sơn người dùng chọn.
+PaintAI là ứng dụng web phối màu sơn kiến trúc bằng AI. Dự án dùng **FastAPI** cho backend, giao diện tĩnh trong thư mục `static/`, SQLite cho dữ liệu mẫu/màu sơn, và hỗ trợ tạo ảnh phối màu bằng Gemini hoặc OpenAI Image API. Khi chạy local có thể bật thêm pipeline AI nội bộ YOLO/SAM để phát hiện vùng kiến trúc.
 
-## Tổng Quan Workflow Phối Màu AI
+## Tính năng chính
 
-```text
-Người dùng upload ảnh
-  -> chọn Nội thất hoặc Ngoại thất
-  -> chọn màu HEX cho từng chi tiết kiến trúc
-  -> frontend gửi payload về backend
-  -> backend đổi mã HEX thành tên màu tiếng Anh theo ngữ cảnh kiến trúc
-  -> backend ghép prompt tiếng Anh chuẩn hóa
-  -> backend gửi ảnh gốc + prompt sang Gemini image API
-  -> Gemini trả về ảnh base64
-  -> frontend hiển thị thanh trượt so sánh Trước/Sau
+- Upload ảnh công trình và tạo phiên xử lý ảnh.
+- Phát hiện/gợi ý vùng cần sơn cho nội thất hoặc ngoại thất.
+- Chọn màu sơn theo mã HEX, danh mục màu, hãng sơn và bộ sưu tập.
+- Tạo ảnh phối màu bằng AI image editing.
+- So sánh ảnh gốc và ảnh sau phối màu trên giao diện.
+- Lưu thiết kế và danh sách màu yêu thích.
+- Hỗ trợ deploy serverless trên Vercel với dependency nhẹ.
+- Hỗ trợ YOLO/SAM local nếu cần xử lý AI offline.
+
+## Công nghệ
+
+- Backend: FastAPI, Uvicorn, Pydantic
+- Frontend: HTML, CSS, JavaScript, Tailwind CDN, Babel CDN
+- Image processing: Pillow, NumPy
+- Database: SQLite (`database.db`)
+- AI image providers: Gemini, OpenAI Image API
+- Local AI tùy chọn: YOLOv8, Torch, OpenCV, SAM
+
+## Cài đặt local
+
+### 1. Tạo môi trường Python
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate
 ```
 
-Ví dụ phần màu trong prompt backend tạo ra:
+Trên macOS/Linux:
 
-```text
-- wall-main (main exterior facade wall): soft warm beige, exact paint HEX #C8B08A
-- trim (trim): charcoal black, exact paint HEX #222222
+```bash
+python -m venv .venv
+source .venv/bin/activate
 ```
 
-## Tính Năng Chính
-
-- Upload ảnh công trình định dạng JPG, PNG, WEBP.
-- Chọn luồng nội thất hoặc ngoại thất.
-- Gán màu sơn cho từng chi tiết kiến trúc.
-- Tạo ảnh phối màu bằng Gemini image editing.
-- So sánh ảnh gốc và ảnh AI bằng thanh trượt Before/After.
-- Xem thư viện màu sơn, mẫu công trình, thiết kế đã lưu.
-- Hỗ trợ tùy chọn stack AI local YOLO/SAM khi chạy ngoài môi trường serverless.
-
-## Cài Đặt Và Chạy Local
-
-### 1. Cài dependency
+### 2. Cài dependency
 
 ```bash
 pip install -r requirements.txt
 ```
 
-`requirements.txt` hiện chỉ gồm các gói nhẹ phù hợp cho Vercel/serverless. Nếu cần YOLO/SAM local, xem mục **AI Local Tùy Chọn** bên dưới.
+`requirements.txt` chỉ chứa các gói nhẹ phù hợp cho local cơ bản và deploy Vercel. Nếu cần YOLO/SAM local, xem mục **AI local tùy chọn**.
 
-### 2. Tạo file `.env`
+### 3. Tạo file `.env`
 
-Tạo file `.env` ở thư mục gốc:
+Sao chép từ `.env.example`:
+
+```bash
+copy .env.example .env
+```
+
+Trên macOS/Linux:
+
+```bash
+cp .env.example .env
+```
+
+Cấu hình tối thiểu khi dùng Gemini:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
 AI_IMAGE_PROVIDER=gemini
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 DISABLE_LOCAL_AI=1
+AI_IMAGE_REQUEST_TIMEOUT_SECONDS=90
 ```
 
-### 3. Chạy server
+### 4. Chạy server
 
 ```bash
 python server.py
@@ -66,82 +82,60 @@ Hoặc:
 python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
-Mở trình duyệt:
+Mở trình duyệt tại:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-## Lấy Gemini API Key
+## Biến môi trường
 
-1. Vào Google AI Studio:
+Biến thường dùng:
 
-```text
-https://aistudio.google.com/app/apikey
+```env
+AI_IMAGE_PROVIDER=gemini
+AI_IMAGE_REQUEST_TIMEOUT_SECONDS=90
+DISABLE_LOCAL_AI=1
+PAINT_SESSIONS_DIR=./paint_sessions
+DATABASE_PATH=./database.db
 ```
 
-2. Đăng nhập tài khoản Google.
-3. Bấm **Create API key**.
-4. Chọn hoặc tạo Google Cloud Project.
-5. Copy key và đưa vào `.env`:
+Gemini:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
+GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 ```
 
-Trên giao diện ứng dụng cũng có nút **API Key**. Nếu nhập key trên giao diện, key sẽ được lưu trong `localStorage` của trình duyệt và gửi kèm mỗi request AI.
+OpenAI Image API:
 
-Thứ tự ưu tiên API key:
+```env
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_IMAGE_MODEL=gpt-image-1
+OPENAI_IMAGE_SIZE=1024x1024
+OPENAI_IMAGE_QUALITY=medium
+```
+
+Ghi chú:
+
+- `AI_IMAGE_PROVIDER` có thể là `local`, `gemini`, `nano-banana`, `openai` hoặc `gpt-image`.
+- `DISABLE_LOCAL_AI=1` nên được bật khi deploy serverless để tránh import Torch/OpenCV.
+- API key nhập từ giao diện có thể được gửi kèm request và sẽ ưu tiên hơn biến môi trường tương ứng.
+
+## Workflow phối màu AI
 
 ```text
-API key nhập trên giao diện
-  -> GEMINI_API_KEY trong biến môi trường
+Người dùng upload ảnh
+  -> chọn loại công trình/nội thất/ngoại thất
+  -> hệ thống phát hiện hoặc nhận danh sách vùng cần sơn
+  -> người dùng chọn màu cho từng vùng
+  -> frontend gửi ảnh, vùng sơn và màu HEX về backend
+  -> backend chuẩn hóa prompt phối màu kiến trúc
+  -> Gemini/OpenAI tạo ảnh phối màu mới
+  -> frontend hiển thị ảnh kết quả để so sánh
 ```
 
-Nếu đổi key trong giao diện thì không cần restart server. Nếu đổi key trong `.env` thì phải restart server.
-
-## Lưu Ý Về Quota Gemini
-
-Model `gemini-2.5-flash-image` có thể không có quota miễn phí đủ để xử lý ảnh thật. Nếu gặp lỗi:
-
-```text
-429 RESOURCE_EXHAUSTED
-Quota exceeded
-free_tier_requests, limit: 0
-```
-
-thì project/key hiện tại không có quota image generation khả dụng. Cần bật billing hoặc dùng key/project khác có quota:
-
-```text
-https://ai.dev/rate-limit
-https://ai.google.dev/gemini-api/docs/rate-limits
-```
-
-## API Chính
-
-Danh mục:
-
-```http
-GET /api/project-types
-GET /api/brands
-GET /api/collections
-GET /api/colors
-```
-
-AI:
-
-```http
-GET  /api/ai/test-key
-POST /api/ai/generate-colors
-```
-
-Proxy ảnh:
-
-```http
-GET /api/proxy-image?url=...
-```
-
-## Payload Tạo Ảnh Phối Màu
+Ví dụ payload tạo ảnh:
 
 ```json
 {
@@ -164,156 +158,152 @@ GET /api/proxy-image?url=...
 }
 ```
 
-Provider hỗ trợ:
+## API chính
 
-```text
-local
-openai
-gpt-image
-gemini
-nano-banana
+Danh mục và dữ liệu:
+
+```http
+GET /api/project-types
+GET /api/brands
+GET /api/collections
+GET /api/collections/{id}/layers
+GET /api/colors
+GET /paint_colors_extracted.json
 ```
 
-Frontend hiện đang gửi `imageProvider: "gemini"` khi người dùng bấm tạo ảnh AI.
+Ảnh và phối màu:
 
-## Biến Môi Trường
+```http
+POST /api/upload-image
+POST /api/apply-paint
+GET  /api/paint-image/{image_id}
+GET  /api/proxy-image?url=...
+```
 
-Bắt buộc cho Gemini image generation:
+AI:
+
+```http
+GET  /api/ai/sam-status
+POST /api/ai-colorize
+GET  /api/ai/test-key
+POST /api/ai/test-key
+POST /api/ai/generate-colors
+```
+
+Lưu thiết kế và màu yêu thích:
+
+```http
+POST   /api/saved-designs
+GET    /api/saved-designs
+DELETE /api/saved-designs/{id}
+POST   /api/favorites/colors/{color_id}
+GET    /api/favorites/colors
+DELETE /api/favorites/colors/{color_id}
+```
+
+## Deploy Vercel
+
+Repo đã có cấu hình sẵn:
+
+- `api/index.py` re-export FastAPI app cho Vercel.
+- `vercel.json` route `/api/*` vào serverless function và route static file vào `static/`.
+- `DISABLE_LOCAL_AI=1` được set để tránh tải các gói AI nặng trên serverless.
+
+Các biến môi trường nên set trong Vercel Dashboard:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key
 AI_IMAGE_PROVIDER=gemini
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
-```
-
-Khuyến nghị khi deploy Vercel:
-
-```env
 DISABLE_LOCAL_AI=1
 AI_IMAGE_REQUEST_TIMEOUT_SECONDS=90
 ```
 
-Tùy chọn OpenAI image provider:
-
-```env
-OPENAI_API_KEY=your-openai-api-key
-OPENAI_IMAGE_MODEL=gpt-image-1
-OPENAI_IMAGE_SIZE=1024x1024
-OPENAI_IMAGE_QUALITY=medium
-```
-
-Tùy chọn lưu trữ local:
-
-```env
-PAINT_SESSIONS_DIR=./paint_sessions
-DATABASE_PATH=./database.db
-```
-
-## Deploy Lên Vercel
-
-Repo đã cấu hình sẵn cho Vercel:
-
-- `api/index.py` là entrypoint serverless FastAPI.
-- `vercel.json` route `/api/*` về serverless function và route static asset về `/static`.
-- `DISABLE_LOCAL_AI=1` để Vercel không import YOLO/Torch/OpenCV.
-- `requirements.txt` chỉ gồm dependency nhẹ.
-
-Cần set các biến môi trường sau trong Vercel Dashboard:
-
-```env
-GEMINI_API_KEY=your-gemini-api-key
-AI_IMAGE_PROVIDER=gemini
-GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
-DISABLE_LOCAL_AI=1
-AI_IMAGE_REQUEST_TIMEOUT_SECONDS=90
-```
-
-Không upload `.env`; file này đã được ignore bởi `.vercelignore`.
-
-Deploy bằng CLI:
+Deploy bằng Vercel CLI:
 
 ```bash
 vercel
 ```
 
-Hoặc deploy qua Git integration của Vercel.
+Không upload `.env` lên Vercel. Dùng Environment Variables trong dashboard.
 
-## AI Local Tùy Chọn
+## AI local tùy chọn
 
-Mặc định deploy không cài các gói nặng như `torch`, `ultralytics`, `opencv-python`. Nếu muốn thử YOLO/SAM local, cài:
+Nếu muốn chạy YOLO/SAM local:
 
 ```bash
 pip install -r requirements-local-ai.txt
 ```
 
-Không đưa các gói này vào `requirements.txt` khi deploy Vercel, vì rất dễ làm build fail hoặc vượt giới hạn serverless.
+Sau đó tắt cờ disable local AI trong `.env`:
 
-## Cấu Trúc Dự Án
+```env
+DISABLE_LOCAL_AI=0
+```
+
+Không đưa `torch`, `ultralytics`, `opencv-python` vào `requirements.txt` khi deploy Vercel vì dễ làm build fail hoặc vượt giới hạn serverless.
+
+## Cấu trúc dự án
 
 ```text
 .
 ├── api/
-│   └── index.py                 # Entrypoint Vercel serverless
+│   └── index.py                  # Entrypoint Vercel serverless
 ├── static/
-│   ├── index.html               # Giao diện chính
-│   ├── app.js                   # Logic frontend
-│   ├── style.css                # CSS
+│   ├── index.html                # Giao diện chính
+│   ├── app.js                    # Logic frontend
+│   ├── ai-editor.js              # UI/logic AI editor
+│   ├── style.css                 # CSS
 │   └── danh_sach_mau_son_chuan.json
-├── ai_image_provider.py         # Lớp gọi Gemini/OpenAI image provider
-├── image_painter.py             # Xử lý ảnh local
-├── sam_segmenter.py             # SAM tùy chọn
-├── yolo_detector.py             # YOLO tùy chọn
-├── server.py                    # FastAPI app
-├── requirements.txt             # Dependency nhẹ cho deploy
-├── requirements-local-ai.txt    # Dependency AI local tùy chọn
-├── vercel.json                  # Cấu hình Vercel
-└── database.db                  # SQLite catalog local
+├── ai_image_provider.py          # Tích hợp Gemini/OpenAI image editing
+├── image_painter.py              # Xử lý ảnh local
+├── sam_segmenter.py              # SAM tùy chọn
+├── yolo_detector.py              # YOLO tùy chọn
+├── server.py                     # FastAPI app
+├── seed_db.py                    # Seed dữ liệu SQLite
+├── requirements.txt              # Dependency nhẹ
+├── requirements-local-ai.txt     # Dependency AI local tùy chọn
+├── vercel.json                   # Cấu hình Vercel
+└── database.db                   # SQLite local
 ```
 
-## Xử Lý Lỗi Thường Gặp
+## Kiểm tra
 
-### Gemini key OK nhưng tạo ảnh lỗi 429
+Chạy smoke test:
 
-Key đúng, nhưng project không có quota cho image model. Cần bật billing hoặc dùng key/project khác có quota image generation.
-
-### Lỗi unexpected model name format
-
-Kiểm tra:
-
-```env
-GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+```bash
+python -m pytest test_smoke.py ai_image_provider_test.py
 ```
 
-Không điền API key hoặc URL vào `GEMINI_IMAGE_MODEL`.
+Kiểm tra cú pháp JavaScript:
 
-### Vercel build fail do Torch/OpenCV
+```bash
+node --check static/app.js
+node --check static/ai-editor.js
+```
 
-Dùng `requirements.txt` hiện tại. Không đưa `torch`, `ultralytics`, `opencv-python` vào `requirements.txt`; các gói này chỉ nằm trong `requirements-local-ai.txt`.
+## Lỗi thường gặp
 
-### Tạo ảnh bị timeout
+### Thiếu hoặc sai API key
 
-Gemini image editing có thể chậm. Giới hạn thời gian chạy function phụ thuộc plan Vercel của bạn. Nếu gặp timeout, cần nâng plan, tối ưu kích thước ảnh upload, hoặc chạy backend ở môi trường server/API riêng thay vì serverless.
+Kiểm tra `GEMINI_API_KEY` hoặc `OPENAI_API_KEY` trong `.env`. Nếu nhập key trên giao diện, key đó sẽ được gửi theo request và có thể ghi đè biến môi trường.
 
-### Ảnh ngoài không hiển thị do CORS
+### Gemini trả lỗi quota 429
 
-Dùng endpoint proxy:
+Key hợp lệ nhưng project không có quota image generation. Cần bật billing, đổi project hoặc dùng provider khác có quota.
+
+### Vercel build fail vì Torch/OpenCV
+
+Dùng `requirements.txt` cho deploy. Các gói nặng chỉ để trong `requirements-local-ai.txt` và chỉ cài khi chạy local.
+
+### Ảnh ngoài bị lỗi CORS
+
+Dùng proxy ảnh:
 
 ```text
 /api/proxy-image?url=https://example.com/image.jpg
 ```
 
-## Kiểm Tra Trước Khi Deploy
+### Tạo ảnh bị timeout
 
-Chạy:
-
-```bash
-python -m pytest test_smoke.py ai_image_provider_test.py
-node --check static/app.js
-```
-
-Kết quả mong đợi:
-
-```text
-tests pass
-JavaScript syntax check passes
-```
+Tăng `AI_IMAGE_REQUEST_TIMEOUT_SECONDS` tối đa 180 giây, giảm kích thước ảnh upload hoặc chạy backend ở môi trường server/API riêng thay vì serverless.

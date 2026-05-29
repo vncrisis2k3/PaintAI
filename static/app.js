@@ -233,6 +233,8 @@ function setAiProcessing(isProcessing) {
         if ("disabled" in el) el.disabled = isProcessing;
         el.classList.toggle("is-disabled", isProcessing);
     });
+
+    aiUpdateZoomControls();
 }
 
 function aiChooseAnotherImage() {
@@ -1219,36 +1221,46 @@ function aiInitializeComparisonSlider() {
 // ZOOM FUNCTIONS FOR AI PREVIEW
 // ==========================================================================
 function aiApplyZoom() {
-    const zoomLevel = state.aiColorTool.zoom;
+    const zoomLevel = aiClampZoom(state.aiColorTool.zoom);
+    state.aiColorTool.zoom = zoomLevel;
     const previewImage = document.getElementById('ai-preview-image');
     const comparisonContainer = document.getElementById('ai-comparison-container');
     const originalImage = document.getElementById('ai-original-image');
     const generatedImage = document.getElementById('ai-generated-image');
     const viewport = document.querySelector('.ai-preview-viewport');
+    const zoomSize = `${zoomLevel * 100}%`;
     
     // Apply zoom to preview image (single image mode)
     if (previewImage && previewImage.style.display !== 'none') {
-        previewImage.style.transform = `scale(${zoomLevel})`;
+        previewImage.style.width = zoomSize;
+        previewImage.style.height = zoomSize;
+        previewImage.style.transform = 'none';
+    } else if (previewImage) {
+        previewImage.style.width = '100%';
+        previewImage.style.height = '100%';
+        previewImage.style.transform = 'none';
     }
     
     // Apply zoom to comparison container and images
     if (comparisonContainer && comparisonContainer.style.display !== 'none') {
-        comparisonContainer.style.transform = `scale(${zoomLevel})`;
-        if (originalImage) originalImage.style.transform = `scale(1)`; // Already scaled by parent
-        if (generatedImage) generatedImage.style.transform = `scale(1)`; // Already scaled by parent
+        comparisonContainer.style.width = zoomSize;
+        comparisonContainer.style.height = zoomSize;
+        comparisonContainer.style.transform = 'none';
+        if (originalImage) originalImage.style.transform = 'none';
+        if (generatedImage) generatedImage.style.transform = 'none';
+    } else if (comparisonContainer) {
+        comparisonContainer.style.width = '100%';
+        comparisonContainer.style.height = '100%';
+        comparisonContainer.style.transform = 'none';
     }
     
     // Update viewport overflow
     if (viewport) {
-        if (zoomLevel > 1.0) {
-            viewport.classList.add('zoom-active');
-        } else {
-            viewport.classList.remove('zoom-active');
-        }
+        viewport.classList.toggle('zoom-active', zoomLevel > state.aiColorTool.minZoom);
     }
     
-    // Update zoom indicator
     aiUpdateZoomIndicator();
+    aiUpdateZoomControls();
 }
 
 function aiUpdateZoomIndicator() {
@@ -1268,59 +1280,86 @@ function aiUpdateZoomIndicator() {
     const zoomPercent = Math.round(state.aiColorTool.zoom * 100);
     indicator.textContent = `${zoomPercent}%`;
     
-    if (state.aiColorTool.zoom > 1.0) {
+    if (state.aiColorTool.zoom > state.aiColorTool.minZoom) {
         indicator.classList.add('show');
     } else {
         indicator.classList.remove('show');
     }
 }
 
-function aiZoomIn() {
+function aiClampZoom(value) {
+    const minZoom = Number(state.aiColorTool.minZoom) || 1;
+    const maxZoom = Number(state.aiColorTool.maxZoom) || 3;
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return minZoom;
+    return Math.min(maxZoom, Math.max(minZoom, numericValue));
+}
+
+function aiHasVisiblePreview() {
+    const previewImage = document.getElementById('ai-preview-image');
+    const comparisonContainer = document.getElementById('ai-comparison-container');
+    return Boolean(
+        (previewImage && previewImage.style.display !== 'none' && previewImage.src) ||
+        (comparisonContainer && comparisonContainer.style.display !== 'none')
+    );
+}
+
+function aiSetZoom(nextZoom, options = {}) {
     if (state.aiColorTool.isProcessing) {
         showToast('AI đang xử lý, vui lòng chờ.', 'error');
         return;
     }
-    
-    const newZoom = Math.min(
-        state.aiColorTool.zoom + 0.25,
-        state.aiColorTool.maxZoom
-    );
-    
-    if (newZoom > state.aiColorTool.maxZoom) {
-        showToast(`Đã đạt mức phóng to tối đa (${state.aiColorTool.maxZoom * 100}%)`, 'success');
+
+    if (!aiHasVisiblePreview()) {
+        aiUpdateZoomControls();
         return;
     }
-    
-    state.aiColorTool.zoom = newZoom;
+
+    const clampedZoom = aiClampZoom(nextZoom);
+    const changed = Math.abs(clampedZoom - state.aiColorTool.zoom) > 0.001;
+    state.aiColorTool.zoom = clampedZoom;
     aiApplyZoom();
-    console.log(`🔍 Zoom in: ${Math.round(newZoom * 100)}%`);
+
+    if (!changed && options.notifyBoundary) {
+        showToast(`Đã ở mức ${Math.round(clampedZoom * 100)}%`, 'success');
+    }
+}
+
+function aiUpdateZoomControls() {
+    const zoom = aiClampZoom(state.aiColorTool.zoom);
+    const zoomPercent = Math.round(zoom * 100);
+    const hasPreview = aiHasVisiblePreview();
+    const isBusy = Boolean(state.aiColorTool.isProcessing);
+    const minZoom = Number(state.aiColorTool.minZoom) || 1;
+    const maxZoom = Number(state.aiColorTool.maxZoom) || 3;
+
+    const zoomOutBtn = document.getElementById('ai-zoom-out-btn');
+    const zoomInBtn = document.getElementById('ai-zoom-in-btn');
+    const resetBtn = document.getElementById('ai-zoom-reset-btn');
+
+    if (zoomOutBtn) {
+        zoomOutBtn.disabled = !hasPreview || isBusy || zoom <= minZoom;
+    }
+    if (zoomInBtn) {
+        zoomInBtn.disabled = !hasPreview || isBusy || zoom >= maxZoom;
+    }
+    if (resetBtn) {
+        resetBtn.textContent = `${zoomPercent}%`;
+        resetBtn.disabled = !hasPreview || isBusy || zoom <= minZoom;
+        resetBtn.setAttribute('aria-label', `Đặt lại zoom, hiện tại ${zoomPercent}%`);
+    }
+}
+
+function aiZoomIn() {
+    aiSetZoom(state.aiColorTool.zoom + 0.25, { notifyBoundary: true });
 }
 
 function aiZoomOut() {
-    if (state.aiColorTool.isProcessing) {
-        showToast('AI đang xử lý, vui lòng chờ.', 'error');
-        return;
-    }
-    
-    const newZoom = Math.max(
-        state.aiColorTool.zoom - 0.25,
-        state.aiColorTool.minZoom
-    );
-    
-    if (newZoom < state.aiColorTool.minZoom) {
-        showToast(`Đã đạt mức thu nhỏ tối thiểu (${state.aiColorTool.minZoom * 100}%)`, 'success');
-        return;
-    }
-    
-    state.aiColorTool.zoom = newZoom;
-    aiApplyZoom();
-    console.log(`🔍 Zoom out: ${Math.round(newZoom * 100)}%`);
+    aiSetZoom(state.aiColorTool.zoom - 0.25, { notifyBoundary: true });
 }
 
 function aiResetZoom() {
-    state.aiColorTool.zoom = 1.0;
-    aiApplyZoom();
-    console.log('🔍 Zoom reset to 100%');
+    aiSetZoom(state.aiColorTool.minZoom || 1);
 }
 
 function aiLoadExportImage(src) {
@@ -2870,6 +2909,7 @@ function setupEventHandlers() {
                     
                     if (previewPlaceholder) previewPlaceholder.style.display = 'none';
                     if (previewControls) previewControls.style.display = 'flex';
+                    aiApplyZoom();
                     
                     document.getElementById('ai-preview-status').textContent = 'Ảnh đã tải lên thành công. Chọn loại công trình.';
                     aiGoToStep(2);
@@ -3087,10 +3127,41 @@ function setupEventHandlers() {
     
     // 7. DIRECT CANVAS CLICK SELECTION
     DOM.visualizerContainer.addEventListener("click", handleVisualizerClick);
+
+    const aiZoomInBtn = document.getElementById('ai-zoom-in-btn');
+    const aiZoomOutBtn = document.getElementById('ai-zoom-out-btn');
+    const aiZoomResetBtn = document.getElementById('ai-zoom-reset-btn');
+    const aiDownloadBtn = document.getElementById('ai-download-btn');
+
+    aiZoomInBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        aiZoomIn();
+    });
+
+    aiZoomOutBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        aiZoomOut();
+    });
+
+    aiZoomResetBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        aiResetZoom();
+    });
+
+    aiDownloadBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        aiDownloadImage();
+    });
+
+    aiUpdateZoomControls();
     
     // 7.5. ZOOM CONTROLS FOR AI PREVIEW
-    const zoomInBtn = document.querySelector('.ai-preview-controls .control-icon-btn:nth-child(1)');
-    const zoomOutBtn = document.querySelector('.ai-preview-controls .control-icon-btn:nth-child(2)');
+    const zoomInBtn = null;
+    const zoomOutBtn = null;
     
     if (zoomInBtn) {
         zoomInBtn.textContent = '🔍+';

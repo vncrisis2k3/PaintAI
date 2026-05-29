@@ -269,10 +269,20 @@
                             <!-- Static generated image (fallback) -->
                             <img id="ai-preview-image" style="display: none;" class="ai-preview-image">
                             
-                            <div class="ai-preview-controls" id="ai-preview-controls" style="display: none;">
-                                <button class="control-icon-btn" title="Phóng to" onclick="aiZoomIn()">🔍+</button>
-                                <button class="control-icon-btn" title="Thu nhỏ" onclick="aiZoomOut()">🔍-</button>
-                                <button class="control-icon-btn control-icon-btn-download" title="Tải ảnh xuống" onclick="aiDownloadImage()">⬇️</button>
+                            <div class="ai-preview-controls" id="ai-preview-controls" style="display: none;" aria-label="Điều khiển xem ảnh">
+                                <div class="ai-zoom-controls" role="group" aria-label="Phóng to thu nhỏ ảnh">
+                                    <button id="ai-zoom-out-btn" class="control-icon-btn" type="button" title="Thu nhỏ" aria-label="Thu nhỏ">
+                                        <i class="fa-solid fa-magnifying-glass-minus"></i>
+                                    </button>
+                                    <button id="ai-zoom-reset-btn" class="ai-zoom-value" type="button" title="Đặt lại zoom" aria-label="Đặt lại zoom">100%</button>
+                                    <button id="ai-zoom-in-btn" class="control-icon-btn" type="button" title="Phóng to" aria-label="Phóng to">
+                                        <i class="fa-solid fa-magnifying-glass-plus"></i>
+                                    </button>
+                                </div>
+                                <button id="ai-download-btn" class="control-icon-btn control-icon-btn-download" type="button" title="Tải ảnh xuống" aria-label="Tải ảnh xuống">
+                                    <i class="fa-solid fa-download"></i>
+                                    <span>Tải xuống</span>
+                                </button>
                             </div>
                         </div>
                         <div class="ai-preview-footer">
