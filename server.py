@@ -1600,6 +1600,13 @@ def read_root():
         return FileResponse(index_path)
     return {"success": False, "message": "Static assets index.html is missing. Place it inside the 'static' directory."}
 
+@app.get("/paint_colors_extracted.json")
+def read_extracted_paint_colors():
+    colors_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paint_colors_extracted.json")
+    if os.path.exists(colors_path):
+        return FileResponse(colors_path, media_type="application/json")
+    raise HTTPException(status_code=404, detail="paint_colors_extracted.json not found")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)

@@ -58,6 +58,11 @@ const state = {
         selectedPart: "wall-main",
         selectedColor: null,
         selectedColors: {},
+        selectedColorDetails: {},
+        colors: [],
+        filteredColors: [],
+        renderedColorCount: 0,
+        colorBrand: "",
         detectedAreasRequestKey: null,
         imageId: null,
         lastClick: null,
@@ -153,6 +158,15 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+function aiSetDownloadButtonVisible(isVisible) {
+    const downloadBtn = document.getElementById("ai-download-btn") || document.querySelector(".control-icon-btn-download");
+    if (!downloadBtn) return;
+    downloadBtn.id = "ai-download-btn";
+    downloadBtn.classList.add("ai-download-action");
+    downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i><span>Tải xuống</span>';
+    downloadBtn.style.display = isVisible ? "inline-flex" : "none";
 }
 
 function aiCompressImageDataUrl(dataUrl, maxDimension = 1600, quality = 0.88) {
@@ -285,6 +299,11 @@ function aiUpdatePaletteSelection() {
     document.querySelectorAll('.color-palette-item').forEach(item => {
         item.classList.toggle('selected', !!selectedHex && item.dataset.hexColor === selectedHex);
     });
+
+    const clearBtn = document.getElementById('ai-clear-color-btn');
+    if (clearBtn) {
+        clearBtn.disabled = !selectedHex;
+    }
 }
 
 function aiRenderPaintAreas(type) {
@@ -421,6 +440,7 @@ function aiSetType(type) {
     // Start with no selected colors. White swatches are only visual defaults;
     // untouched areas must not be sent to the painter.
     state.aiColorTool.selectedColors = {};
+    state.aiColorTool.selectedColorDetails = {};
     state.aiColorTool.areaClicks = {};
     state.aiColorTool.lastClick = null;
     const areas = paintAreas[type] || paintAreas.interior;
@@ -453,6 +473,7 @@ function aiGoToStep(step) {
         document.getElementById('ai-preview-status').textContent = 'Đã tải ảnh. Vui lòng chọn loại công trình.';
     } else if (step === 3) {
         document.getElementById('ai-preview-status').textContent = 'Ảnh gốc đã tải lên. Áp dụng màu để xem kết quả từ AI.';
+        aiEnsureClearColorButton();
         // Load colors only when step 3 is displayed
         aiLoadColors();
     }
@@ -467,6 +488,11 @@ function aiResetAll() {
         selectedPart: "wall-main",
         selectedColor: null,
         selectedColors: {},
+        selectedColorDetails: {},
+        colors: [],
+        filteredColors: [],
+        renderedColorCount: 0,
+        colorBrand: "",
         detectedAreasRequestKey: null,
         imageId: null,
         lastClick: null,
@@ -495,6 +521,7 @@ function aiResetAll() {
     if (previewImage) previewImage.style.display = 'none';
     if (comparisonContainer) comparisonContainer.style.display = 'none';
     if (previewControls) previewControls.style.display = 'none';
+    aiSetDownloadButtonVisible(false);
     if (previewPlaceholder) previewPlaceholder.style.display = 'block';
     
     // Reset step UI
@@ -522,9 +549,11 @@ function aiSelectPart(element, partId) {
     aiUpdatePaletteSelection();
 }
 
-async function aiSelectColor(hexColor) {
+async function aiSelectColor(hexColor, colorInfo = null) {
     state.aiColorTool.selectedColor = hexColor;
     state.aiColorTool.selectedColors[state.aiColorTool.selectedPart] = hexColor;
+    const selectedInfo = colorInfo || state.aiColorTool.colors.find(color => (color.hex_code || '').toLowerCase() === (hexColor || '').toLowerCase());
+    state.aiColorTool.selectedColorDetails[state.aiColorTool.selectedPart] = selectedInfo || { hex_code: hexColor };
     window.globalDetectedAreas = [];
     state.aiColorTool.detectedAreasRequestKey = null;
     aiUpdatePaletteSelection();
@@ -546,6 +575,51 @@ async function aiSelectColor(hexColor) {
 
     
     showToast('Đã chọn màu cho phần này', 'success');
+}
+
+function aiClearSelectedPartColor() {
+    const partId = state.aiColorTool.selectedPart;
+    if (!partId || !state.aiColorTool.selectedColors[partId]) return;
+
+    delete state.aiColorTool.selectedColors[partId];
+    delete state.aiColorTool.selectedColorDetails[partId];
+    state.aiColorTool.selectedColor = null;
+    window.globalDetectedAreas = [];
+    state.aiColorTool.detectedAreasRequestKey = null;
+
+    const activeItem = document.querySelector('.color-part-item.active');
+    const swatch = activeItem?.querySelector('.color-swatch');
+    const status = activeItem?.querySelector('.part-paint-status');
+
+    if (swatch) {
+        swatch.style.background = '';
+        swatch.classList.add('unpainted');
+        swatch.title = 'Chưa sơn';
+    }
+
+    if (status) {
+        status.textContent = 'Chưa sơn';
+        status.style.color = '';
+    }
+
+    aiUpdatePaletteSelection();
+    showToast('Đã bỏ chọn màu cho vùng này', 'success');
+}
+
+function aiEnsureClearColorButton() {
+    if (document.getElementById('ai-clear-color-btn')) return;
+
+    const palette = document.getElementById('ai-color-palette');
+    if (!palette) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'ai-clear-color-btn';
+    btn.className = 'ai-clear-color-btn';
+    btn.innerHTML = '<i class="fa-solid fa-xmark"></i><span>Bỏ chọn màu vùng này</span>';
+    btn.onclick = aiClearSelectedPartColor;
+    palette.parentNode.insertBefore(btn, palette);
+    aiUpdatePaletteSelection();
 }
 
 const AI_DEFAULT_MASK_AREAS = [
@@ -656,6 +730,7 @@ async function aiApplyPaintAtClick() {
     }
 
     setAiProcessing(true);
+    aiSetDownloadButtonVisible(false);
     showToast('Đang sơn vùng đã click bằng mask AI...', 'success');
     try {
         const response = await fetch(`${API_BASE}/api/apply-paint`, {
@@ -687,6 +762,9 @@ async function aiApplyPaintAtClick() {
         }
         if (previewPlaceholder) previewPlaceholder.style.display = 'none';
         if (previewImage) previewImage.style.display = 'none';
+        const previewControls = document.getElementById('ai-preview-controls');
+        if (previewControls) previewControls.style.display = 'flex';
+        aiSetDownloadButtonVisible(true);
         
         // Reset zoom
         state.aiColorTool.zoom = 1.0;
@@ -704,35 +782,112 @@ async function aiApplyPaintAtClick() {
     }
 }
 
-async function aiLoadColors() {
+function aiGetBrandLabel(brandName) {
+    return brandName === "ATLETIC" ? "ATA / ATLETIC" : (brandName || "Khác");
+}
+
+function aiRenderBrandCategories(colors) {
+    const container = document.getElementById('ai-brand-categories-scroll');
+    if (!container) return;
+
+    const brands = [...new Set(colors.map(color => color.brand_name).filter(brand => brand && brand !== "N/A"))];
+    container.innerHTML = '<button class="brand-chip active" data-brand-name="">Tất cả</button>' +
+        brands.map(brand => `<button class="brand-chip" data-brand-name="${brand}">${aiGetBrandLabel(brand)}</button>`).join("");
+    const label = document.getElementById("ai-brand-dropdown-label");
+    if (label) label.textContent = "Tất cả";
+}
+
+function aiRenderColorPalette() {
     const container = document.getElementById('ai-color-palette');
     if (!container) return;
-    
-    const renderColors = (colors) => {
-        container.innerHTML = '';
-        colors.forEach((color) => {
-            const btn = document.createElement('button');
-            btn.className = 'color-palette-item';
-            btn.style.background = color.hex_code;
-            btn.dataset.hexColor = color.hex_code;
-            btn.title = `${color.paint_code} - ${color.hex_code}`;
-            btn.textContent = color.paint_code;
-            btn.onclick = function(e) {
-                e.preventDefault();
-                aiSelectColor(color.hex_code);
-            };
-            container.appendChild(btn);
-        });
-        aiUpdatePaletteSelection();
+
+    const searchInput = document.getElementById('ai-color-search');
+    const searchTerm = (searchInput?.value || '').trim().toLowerCase();
+    const activeBrand = state.aiColorTool.colorBrand;
+    const colors = state.aiColorTool.colors.filter(color => {
+        const matchesBrand = !activeBrand || color.brand_name === activeBrand;
+        const haystack = `${color.paint_code || ''} ${color.name || ''} ${color.hex_code || ''}`.toLowerCase();
+        return matchesBrand && (!searchTerm || haystack.includes(searchTerm));
+    });
+
+    state.aiColorTool.filteredColors = colors;
+    state.aiColorTool.renderedColorCount = 0;
+    container.innerHTML = '';
+    container.scrollTop = 0;
+    aiAppendColorPaletteBatch();
+}
+
+function aiAppendColorPaletteBatch() {
+    const container = document.getElementById('ai-color-palette');
+    if (!container) return;
+
+    const colors = state.aiColorTool.filteredColors || [];
+
+    if (colors.length === 0) {
+        state.aiColorTool.renderedColorCount = 0;
+        container.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: var(--text-muted);">Không tìm thấy màu phù hợp</p>';
+        return;
+    }
+
+    const start = state.aiColorTool.renderedColorCount || 0;
+    const batchSize = 160;
+    const end = Math.min(start + batchSize, colors.length);
+    const fragment = document.createDocumentFragment();
+
+    colors.slice(start, end).forEach((color) => {
+        const btn = document.createElement('button');
+        btn.className = 'color-palette-item';
+        btn.style.background = color.hex_code;
+        btn.dataset.hexColor = color.hex_code;
+        btn.title = `${aiGetBrandLabel(color.brand_name)} - ${color.paint_code} - ${color.hex_code}`;
+        btn.textContent = color.paint_code;
+        btn.onclick = function(e) {
+            e.preventDefault();
+            aiSelectColor(color.hex_code, color);
+        };
+        fragment.appendChild(btn);
+    });
+
+    if (colors.length === 0) {
+        container.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: var(--text-muted);">Không tìm thấy màu phù hợp</p>';
+        return;
+    }
+
+    container.appendChild(fragment);
+    state.aiColorTool.renderedColorCount = end;
+
+    aiUpdatePaletteSelection();
+}
+
+async function aiLoadColors() {
+    const setColors = (colors) => {
+        const visibleColors = colors.filter(color => color.brand_name !== "N/A");
+        state.aiColorTool.colors = visibleColors;
+        aiRenderBrandCategories(visibleColors);
+        aiRenderColorPalette();
     };
     
     try {
-        // Primary source: danh_sach_mau_son_chuan.json (standard color list)
+        // Primary source: full extracted paint catalog
+        const response = await fetch('/paint_colors_extracted.json');
+        const data = await response.json();
+        const colors = Array.isArray(data) ? data : data.colors;
+        
+        if (colors && colors.length > 0) {
+            setColors(colors);
+            return;
+        }
+    } catch (e) {
+        console.warn('Failed to load from paint_colors_extracted.json:', e);
+    }
+
+    try {
+        // Fallback: old standard color list
         const response = await fetch('/static/danh_sach_mau_son_chuan.json');
         const colors = await response.json();
         
         if (Array.isArray(colors) && colors.length > 0) {
-            renderColors(colors);
+            setColors(colors);
             return;
         }
     } catch (e) {
@@ -745,7 +900,7 @@ async function aiLoadColors() {
         const result = await response.json();
         
         if (result.success && result.data && result.data.length > 0) {
-            renderColors(result.data);
+            setColors(result.data);
             return;
         }
     } catch (e) {
@@ -759,7 +914,7 @@ async function aiLoadColors() {
         const colors = data.data.colors;
         
         if (colors && colors.length > 0) {
-            renderColors(colors);
+            setColors(colors);
             return;
         }
     } catch (e) {
@@ -811,6 +966,7 @@ async function aiGenerateColors() {
     // Show loading state
     showToast('⏳ Đang phân tích vùng sơn bằng Gemini AI...', 'success');
     setAiProcessing(true);
+    aiSetDownloadButtonVisible(false);
     
     try {
         const requestedAreas = aiBuildRequestedAreas(colors);
@@ -912,6 +1068,7 @@ async function aiGenerateColors() {
                 
                 // Show preview controls for zoom
                 if (previewControls) previewControls.style.display = 'flex';
+                aiSetDownloadButtonVisible(true);
                 
                 // Reset zoom
                 state.aiColorTool.zoom = 1.0;
@@ -1166,7 +1323,253 @@ function aiResetZoom() {
     console.log('🔍 Zoom reset to 100%');
 }
 
+function aiLoadExportImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+function aiWrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = String(text || '').split(/\s+/);
+    let line = '';
+    let currentY = y;
+
+    words.forEach((word) => {
+        const testLine = line ? `${line} ${word}` : word;
+        if (ctx.measureText(testLine).width > maxWidth && line) {
+            ctx.fillText(line, x, currentY);
+            line = word;
+            currentY += lineHeight;
+        } else {
+            line = testLine;
+        }
+    });
+
+    if (line) {
+        ctx.fillText(line, x, currentY);
+        currentY += lineHeight;
+    }
+
+    return currentY;
+}
+
+function aiDrawImageContain(ctx, img, x, y, width, height) {
+    const scale = Math.min(width / img.width, height / img.height);
+    const drawWidth = img.width * scale;
+    const drawHeight = img.height * scale;
+    ctx.drawImage(img, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
+function aiCreateTransparentWatermark(img) {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return img;
+
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const isNearWhite = r > 238 && g > 238 && b > 238;
+
+        if (isNearWhite) {
+            data[i + 3] = 0;
+        } else {
+            data[i] = Math.max(0, Math.round(r * 0.72));
+            data[i + 1] = Math.max(0, Math.round(g * 0.72));
+            data[i + 2] = Math.max(0, Math.round(b * 0.72));
+            data[i + 3] = Math.min(255, Math.round(data[i + 3] * 1.35));
+        }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
+}
+
+function aiGetExportColorRows() {
+    const type = state.aiColorTool.projectType;
+    const areas = paintAreas[type] || paintAreas.interior;
+    const rows = [];
+
+    areas.forEach((area) => {
+        const hex = state.aiColorTool.selectedColors[area.id];
+        if (!hex) return;
+
+        const info = state.aiColorTool.selectedColorDetails[area.id] || {};
+        const code = info.paint_code || info.name || hex;
+        const brand = info.brand_name ? `${aiGetBrandLabel(info.brand_name)} - ` : '';
+        rows.push(`${area.label}: ${brand}${code}`);
+    });
+
+    return rows;
+}
+
+async function aiDownloadImageWithPanel() {
+    const generatedImg = document.getElementById('ai-generated-image');
+    const previewImg = document.getElementById('ai-preview-image');
+
+    let imageSource = null;
+    if (generatedImg && generatedImg.src && generatedImg.style.display !== 'none') {
+        imageSource = generatedImg;
+    } else if (previewImg && previewImg.src && previewImg.style.display !== 'none') {
+        imageSource = previewImg;
+    }
+
+    if (!imageSource || !imageSource.src) {
+        showToast('Chưa có ảnh phối màu để tải xuống', 'error');
+        return;
+    }
+
+    try {
+        const [img, logo, watermark] = await Promise.all([
+            aiLoadExportImage(imageSource.src),
+            aiLoadExportImage('/static/logo_SeaProWTM.png').catch(() => null),
+            aiLoadExportImage('/static/watermask.png').catch(() => null)
+        ]);
+
+        const panelWidth = Math.max(320, Math.round(img.width * 0.28));
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width + panelWidth;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Không thể tạo canvas xuất ảnh');
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+
+        if (watermark) {
+            ctx.save();
+            const transparentWatermark = aiCreateTransparentWatermark(watermark);
+            const wmWidth = Math.min(img.width * 0.15, img.height * 0.15);
+            const wmHeight = wmWidth * (transparentWatermark.height / transparentWatermark.width);
+            const wmX = (img.width - wmWidth) / 2;
+            const wmY = (img.height - wmHeight) / 2;
+
+            ctx.globalAlpha = 0.95;
+            ctx.drawImage(transparentWatermark, wmX, wmY, wmWidth, wmHeight);
+            ctx.restore();
+        }
+
+        const panelX = img.width;
+        const topH = Math.round(img.height * 0.24);
+        const bottomH = Math.round(img.height * 0.18);
+        const middleH = img.height - topH - bottomH;
+        const pad = Math.max(24, Math.round(panelWidth * 0.075));
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(panelX, 0, panelWidth, img.height);
+        ctx.strokeStyle = '#dbe3ef';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(panelX, 0, panelWidth, img.height);
+        ctx.beginPath();
+        ctx.moveTo(panelX, topH);
+        ctx.lineTo(panelX + panelWidth, topH);
+        ctx.moveTo(panelX, topH + middleH);
+        ctx.lineTo(panelX + panelWidth, topH + middleH);
+        ctx.stroke();
+
+        if (logo) {
+            aiDrawImageContain(ctx, logo, panelX + pad, pad, panelWidth - pad * 2, topH - pad * 2);
+        } else {
+            ctx.fillStyle = '#4352a5';
+            ctx.font = '800 28px Inter, Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('SEAPRO', panelX + panelWidth / 2, topH / 2);
+            ctx.textAlign = 'left';
+        }
+
+        const rows = aiGetExportColorRows();
+        let textY = topH + pad + 8;
+        ctx.fillStyle = '#111827';
+        ctx.font = '800 22px Inter, Arial, sans-serif';
+        ctx.fillText('Phương Án màu:', panelX + pad, textY);
+        textY += 34;
+        ctx.fillStyle = '#334155';
+        ctx.font = '700 16px Inter, Arial, sans-serif';
+
+        if (rows.length) {
+            rows.forEach((row) => {
+                if (textY > topH + middleH - pad) return;
+                textY = aiWrapCanvasText(ctx, row, panelX + pad, textY, panelWidth - pad * 2, 22) + 6;
+            });
+        } else {
+            aiWrapCanvasText(ctx, 'Chưa chọn màu sơn', panelX + pad, textY, panelWidth - pad * 2, 22);
+        }
+
+        const contentX = panelX + pad;
+        const contentWidth = panelWidth - pad * 2;
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(panelX + 2, topH + 2, panelWidth - 4, middleH - 4);
+
+        let prettyTextY = topH + pad + 18;
+        ctx.fillStyle = '#e8ecff';
+        ctx.fillRect(contentX, prettyTextY - 34, contentWidth, 48);
+        ctx.fillStyle = '#111827';
+        ctx.font = '900 28px Manrope, Inter, Arial, sans-serif';
+        ctx.fillText('Phương án màu', contentX + 12, prettyTextY);
+        prettyTextY += 54;
+        ctx.font = '800 20px Inter, Arial, sans-serif';
+
+        if (rows.length) {
+            rows.forEach((row) => {
+                if (prettyTextY > topH + middleH - pad) return;
+                ctx.fillStyle = '#eef2f7';
+                ctx.fillRect(contentX, prettyTextY - 24, contentWidth, 46);
+                ctx.fillStyle = '#1f2937';
+                prettyTextY = aiWrapCanvasText(ctx, row, contentX + 12, prettyTextY + 7, contentWidth - 24, 27) + 12;
+            });
+        } else {
+            ctx.fillStyle = '#1f2937';
+            aiWrapCanvasText(ctx, 'Chưa chọn màu sơn', contentX + 12, prettyTextY, contentWidth - 24, 27);
+        }
+
+        ctx.strokeStyle = '#dbe3ef';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(panelX, topH);
+        ctx.lineTo(panelX + panelWidth, topH);
+        ctx.moveTo(panelX, topH + middleH);
+        ctx.lineTo(panelX + panelWidth, topH + middleH);
+        ctx.stroke();
+
+        const bottomY = topH + middleH;
+        ctx.fillStyle = '#4352a5';
+        ctx.font = '800 20px Inter, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Nhà phân phối', panelX + panelWidth / 2, bottomY + bottomH / 2 - 12);
+        ctx.font = '900 28px Manrope, Arial, sans-serif';
+        ctx.fillText('Trí Sơn', panelX + panelWidth / 2, bottomY + bottomH / 2 + 24);
+        ctx.textAlign = 'left';
+
+        canvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `phoi-mau-AI-${new Date().getTime()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast('Đã tải ảnh phối màu xuống máy', 'success');
+        }, 'image/png');
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast('Lỗi khi tải ảnh: ' + error.message, 'error');
+    }
+}
+
 function aiDownloadImage() {
+    return aiDownloadImageWithPanel();
     const generatedImg = document.getElementById('ai-generated-image');
     const previewImg = document.getElementById('ai-preview-image');
     
@@ -1267,7 +1670,10 @@ async function fetchBrands() {
         if (result.success) {
             state.brands = result.data;
             DOM.brandFilter.innerHTML = '<option value="">Tất cả hãng</option>' + 
-                state.brands.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
+                state.brands.map(b => {
+                    const brandLabel = b.name === "ATLETIC" ? "ATA / ATLETIC" : b.name;
+                    return `<option value="${b.id}">${brandLabel}</option>`;
+                }).join("");
         }
     } catch (e) {
         console.error("Error fetching brands:", e);
@@ -1449,21 +1855,21 @@ function renderColorsGrid(newColors, reset) {
         item.className = "color-item";
         item.dataset.hexCode = color.hex_code; // Store hex code for matching
         item.title = `${color.brand_name} - ${color.name} (finish: ${color.finish || 'Matt'})`;
+        const brandLabel = color.brand_name === "ATLETIC" ? "ATA / ATLETIC" : (color.brand_name || "");
         
         item.innerHTML = `
             <div class="color-bubble" style="background-color: ${color.hex_code};"></div>
             <span class="color-code">${color.paint_code}</span>
             <span class="color-name">${color.name}</span>
+            <span class="color-brand">${brandLabel}</span>
         `;
         
         item.addEventListener("click", (e) => {
             // Select and apply color
             applyColorToActiveLayer(color);
             
-            // Highlight color bubble click micro-animation
-            const bubble = item.querySelector(".color-bubble");
-            bubble.style.transform = "scale(1.3)";
-            setTimeout(() => bubble.style.transform = "none", 150);
+            item.classList.add("just-selected");
+            setTimeout(() => item.classList.remove("just-selected"), 150);
         });
         
         DOM.colorsGrid.appendChild(item);
@@ -2426,6 +2832,8 @@ function exportImage() {
 // ==========================================================================
 function setupEventHandlers() {
     // 0. AI COLOR TOOL EVENT HANDLERS
+    aiSetDownloadButtonVisible(false);
+
     const aiFileInput = document.getElementById("ai-file-input");
     if (aiFileInput) {
         aiFileInput.addEventListener("change", (e) => {
@@ -2451,6 +2859,7 @@ function setupEventHandlers() {
                     
                     if (comparisonContainer) comparisonContainer.style.display = 'none';
                     if (previewImage) previewImage.style.display = 'none';
+                    aiSetDownloadButtonVisible(false);
                     
                     // Show original image temporarily
                     if (previewImage) {
@@ -2517,6 +2926,56 @@ function setupEventHandlers() {
             imageEl.style.cursor = 'default';
         }
     });
+
+    const aiColorSearch = document.getElementById("ai-color-search");
+    if (aiColorSearch) {
+        aiColorSearch.addEventListener("input", debounce(() => {
+            aiRenderColorPalette();
+        }, 200));
+    }
+
+    const aiColorPalette = document.getElementById("ai-color-palette");
+    if (aiColorPalette) {
+        aiColorPalette.addEventListener("scroll", () => {
+            const hasMore = state.aiColorTool.renderedColorCount < state.aiColorTool.filteredColors.length;
+            if (!hasMore) return;
+
+            const nearBottom = aiColorPalette.scrollTop + aiColorPalette.clientHeight >= aiColorPalette.scrollHeight - 80;
+            if (nearBottom) {
+                aiAppendColorPaletteBatch();
+            }
+        });
+    }
+
+    const aiBrandCategories = document.getElementById("ai-brand-categories-scroll");
+    const aiBrandDropdown = document.getElementById("ai-brand-dropdown");
+    const aiBrandDropdownToggle = document.getElementById("ai-brand-dropdown-toggle");
+    if (aiBrandDropdown && aiBrandDropdownToggle) {
+        aiBrandDropdownToggle.addEventListener("click", (e) => {
+            e.preventDefault();
+            aiBrandDropdown.classList.toggle("open");
+        });
+
+        document.addEventListener("click", (e) => {
+            if (!aiBrandDropdown.contains(e.target)) {
+                aiBrandDropdown.classList.remove("open");
+            }
+        });
+    }
+
+    if (aiBrandCategories) {
+        aiBrandCategories.addEventListener("click", (e) => {
+            const chip = e.target.closest(".brand-chip");
+            if (!chip) return;
+
+            state.aiColorTool.colorBrand = chip.dataset.brandName || "";
+            aiBrandCategories.querySelectorAll(".brand-chip").forEach(c => c.classList.toggle("active", c === chip));
+            const label = document.getElementById("ai-brand-dropdown-label");
+            if (label) label.textContent = chip.textContent.trim();
+            if (aiBrandDropdown) aiBrandDropdown.classList.remove("open");
+            aiRenderColorPalette();
+        });
+    }
 
     // Color palette items click handler
     const colorPaletteItems = document.querySelectorAll(".color-palette-item");
