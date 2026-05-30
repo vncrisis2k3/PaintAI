@@ -100,6 +100,9 @@
             
             <!-- STICKY TOP HEADER - PaintAI Header.tsx style -->
             <header class="main-header">
+                <button id="sidebar-toggle-btn" class="header-icon-btn" aria-label="Toggle sidebar">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
                 <div class="header-title-area">
                     <h2 id="header-main-title">Trợ Lý Phối Màu AI</h2>
                     <p id="header-sub-title">Tự động phân tách và phối màu trực quan bằng AI trong 30 giây</p>
@@ -124,6 +127,8 @@
                     </div>
                 </div>
             </header>
+
+            <div id="sidebar-overlay"></div>
 
             <!-- TAB CONTENT: PHỐI MÀU AI - FULL EDITOR -->
             <div id="tab-content-ai" class="tab-content-wrapper active">
@@ -197,7 +202,7 @@
                                                 <i class="fa-solid fa-chevron-down"></i>
                                             </button>
                                             <div class="brand-dropdown-menu brand-categories-scroll" id="ai-brand-categories-scroll">
-                                                <button class="brand-chip active" data-brand-name="">Tất cả</button>
+                                                <button class="brand-chip active" data-category="">Tất cả</button>
                                             </div>
                                         </div>
                                     </div>

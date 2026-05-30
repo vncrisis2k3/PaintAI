@@ -62,7 +62,7 @@ const state = {
         colors: [],
         filteredColors: [],
         renderedColorCount: 0,
-        colorBrand: "",
+        colorCategory: "",
         detectedAreasRequestKey: null,
         imageId: null,
         lastClick: null,
@@ -494,7 +494,7 @@ function aiResetAll() {
         colors: [],
         filteredColors: [],
         renderedColorCount: 0,
-        colorBrand: "",
+        colorCategory: "",
         detectedAreasRequestKey: null,
         imageId: null,
         lastClick: null,
@@ -784,17 +784,17 @@ async function aiApplyPaintAtClick() {
     }
 }
 
-function aiGetBrandLabel(brandName) {
-    return brandName === "ATLETIC" ? "ATA / ATLETIC" : (brandName || "Khác");
+function aiGetCategoryLabel(categoryName) {
+    return categoryName === "ATLETIC" ? "ATA / ATLETIC" : (categoryName || "Khác");
 }
 
 function aiRenderBrandCategories(colors) {
     const container = document.getElementById('ai-brand-categories-scroll');
     if (!container) return;
 
-    const brands = [...new Set(colors.map(color => color.brand_name).filter(brand => brand && brand !== "N/A"))];
-    container.innerHTML = '<button class="brand-chip active" data-brand-name="">Tất cả</button>' +
-        brands.map(brand => `<button class="brand-chip" data-brand-name="${brand}">${aiGetBrandLabel(brand)}</button>`).join("");
+    const categories = [...new Set(colors.map(color => color.category).filter(cat => cat && cat !== "N/A"))];
+    container.innerHTML = '<button class="brand-chip active" data-category="">Tất cả</button>' +
+        categories.map(cat => `<button class="brand-chip" data-category="${cat}">${aiGetCategoryLabel(cat)}</button>`).join("");
     const label = document.getElementById("ai-brand-dropdown-label");
     if (label) label.textContent = "Tất cả";
 }
@@ -805,11 +805,11 @@ function aiRenderColorPalette() {
 
     const searchInput = document.getElementById('ai-color-search');
     const searchTerm = (searchInput?.value || '').trim().toLowerCase();
-    const activeBrand = state.aiColorTool.colorBrand;
+    const activeCategory = state.aiColorTool.colorCategory;
     const colors = state.aiColorTool.colors.filter(color => {
-        const matchesBrand = !activeBrand || color.brand_name === activeBrand;
+        const matchesCategory = !activeCategory || color.category === activeCategory;
         const haystack = `${color.paint_code || ''} ${color.name || ''} ${color.hex_code || ''}`.toLowerCase();
-        return matchesBrand && (!searchTerm || haystack.includes(searchTerm));
+        return matchesCategory && (!searchTerm || haystack.includes(searchTerm));
     });
 
     state.aiColorTool.filteredColors = colors;
@@ -841,7 +841,7 @@ function aiAppendColorPaletteBatch() {
         btn.className = 'color-palette-item';
         btn.style.background = color.hex_code;
         btn.dataset.hexColor = color.hex_code;
-        btn.title = `${aiGetBrandLabel(color.brand_name)} - ${color.paint_code} - ${color.hex_code}`;
+        btn.title = `${aiGetCategoryLabel(color.category)} - ${color.paint_code} - ${color.hex_code}`;
         btn.textContent = color.paint_code;
         btn.onclick = function(e) {
             e.preventDefault();
@@ -863,7 +863,7 @@ function aiAppendColorPaletteBatch() {
 
 async function aiLoadColors() {
     const setColors = (colors) => {
-        const visibleColors = colors.filter(color => color.brand_name !== "N/A");
+        const visibleColors = colors.filter(color => color.category !== "N/A");
         state.aiColorTool.colors = visibleColors;
         aiRenderBrandCategories(visibleColors);
         aiRenderColorPalette();
@@ -1445,7 +1445,7 @@ function aiGetExportColorRows() {
 
         const info = state.aiColorTool.selectedColorDetails[area.id] || {};
         const code = info.paint_code || info.name || hex;
-        const brand = info.brand_name ? `${aiGetBrandLabel(info.brand_name)} - ` : '';
+        const brand = info.category ? `${aiGetCategoryLabel(info.category)} - ` : '';
         rows.push(`${area.label}: ${brand}${code}`);
     });
 
@@ -1893,8 +1893,8 @@ function renderColorsGrid(newColors, reset) {
         const item = document.createElement("div");
         item.className = "color-item";
         item.dataset.hexCode = color.hex_code; // Store hex code for matching
-        item.title = `${color.brand_name} - ${color.name} (finish: ${color.finish || 'Matt'})`;
-        const brandLabel = color.brand_name === "ATLETIC" ? "ATA / ATLETIC" : (color.brand_name || "");
+        item.title = `${color.category} - ${color.name} (finish: ${color.finish || 'Matt'})`;
+        const brandLabel = color.category === "ATLETIC" ? "ATA / ATLETIC" : (color.category || "");
         
         item.innerHTML = `
             <div class="color-bubble" style="background-color: ${color.hex_code};"></div>
@@ -2382,6 +2382,14 @@ function setupSidebarTabs() {
             tab.btn.classList.add("active");
             if (tab.content) tab.content.classList.add("active");
             
+            // If on mobile, close the overlay sidebar after selecting a tab
+            try {
+                const app = document.querySelector('.app-container');
+                if (window.innerWidth <= 768 && app) {
+                    app.classList.remove('sidebar-open');
+                }
+            } catch (err) { /* ignore */ }
+
             if (tab.btn === DOM.tabSaved) {
                 fetchSavedDesigns();
             }
@@ -2434,17 +2442,30 @@ function renderSavedDesignsList() {
         const item = document.createElement("div");
         item.className = "saved-design-item";
         
-        // Color dots preview
+        // Color dots preview and gradient thumbnail
+        const colorValues = Object.values(design.colors || {});
         let colorsDots = "";
-        Object.values(design.colors).forEach(hex => {
+        colorValues.forEach(hex => {
             colorsDots += `<span class="saved-design-color-dot" style="background-color: ${hex}"></span>`;
         });
+
+        // Build thumbnail: use gradient if no explicit thumbnail URL
+        let thumbHtml = '';
+        if (design.thumbnail_url) {
+            thumbHtml = `<div class="saved-design-thumb"><img src="${design.thumbnail_url}" alt="${design.name}" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:12px"></div>`;
+        } else if (colorValues.length > 0) {
+            const stops = colorValues.slice(0,4).map((c, i) => `${c} ${(i/(Math.min(3,colorValues.length-1)))*100}%`).join(',');
+            thumbHtml = `<div class="saved-design-thumb"><div class="thumb-inner" style="background: linear-gradient(135deg, ${colorValues.join(',')});"></div></div>`;
+        } else {
+            thumbHtml = `<div class="saved-design-thumb"></div>`;
+        }
         
         const dateStr = new Date(design.created_at).toLocaleDateString("vi-VN", {
             day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
         });
         
         item.innerHTML = `
+            ${thumbHtml}
             <div class="saved-design-header">
                 <h4 class="saved-design-title" title="${design.name}">${design.name}</h4>
                 <button class="delete-design-btn" data-id="${design.id}" title="Xóa thiết kế">
@@ -3008,7 +3029,7 @@ function setupEventHandlers() {
             const chip = e.target.closest(".brand-chip");
             if (!chip) return;
 
-            state.aiColorTool.colorBrand = chip.dataset.brandName || "";
+            state.aiColorTool.colorCategory = chip.dataset.category || "";
             aiBrandCategories.querySelectorAll(".brand-chip").forEach(c => c.classList.toggle("active", c === chip));
             const label = document.getElementById("ai-brand-dropdown-label");
             if (label) label.textContent = chip.textContent.trim();
@@ -3213,6 +3234,49 @@ function setupEventHandlers() {
     
     // 8. LOAD API KEY FROM STORAGE
     loadAPIKey();
+
+    // Initialize sidebar toggle behavior (hamburger + overlay)
+    initSidebarToggle();
+}
+
+// Sidebar toggle: show/hide sidebar on mobile, collapse on desktop
+function initSidebarToggle() {
+    const app = document.querySelector('.app-container');
+    const toggleBtn = document.getElementById('sidebar-toggle-btn');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (!app || !toggleBtn) return;
+
+    // Apply saved collapsed state for desktop
+    if (localStorage.getItem('sidebarCollapsed') === '1') {
+        app.classList.add('sidebar-collapsed');
+    }
+
+    toggleBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        // Mobile: toggle open overlay sidebar
+        if (window.innerWidth <= 768) {
+            app.classList.toggle('sidebar-open');
+            return;
+        }
+
+        // Desktop: collapse/expand sidebar
+        app.classList.toggle('sidebar-collapsed');
+        const collapsed = app.classList.contains('sidebar-collapsed');
+        localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+
+    if (overlay) {
+        overlay.addEventListener('click', () => {
+            app.classList.remove('sidebar-open');
+        });
+    }
+
+    // Close mobile open state when resizing to large screens
+    window.addEventListener('resize', debounce(() => {
+        if (window.innerWidth > 768) {
+            app.classList.remove('sidebar-open');
+        }
+    }, 200));
 }
 
 // ==================== API KEY MODAL FUNCTIONS ====================
